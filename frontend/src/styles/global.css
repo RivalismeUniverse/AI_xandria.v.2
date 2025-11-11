@@ -1,0 +1,204 @@
+/* GLOBAL STYLES - AI_XANDRIA Design System (v1 Consistency) */
+:root {
+  /* Color Palette - Same as v1 */
+  --neon-pink: #ff1493;
+  --neon-cyan: #00ffff;
+  --neon-green: #00ff00;
+  --neon-yellow: #ffd700;
+  --neon-purple: #da70d6;
+
+  --dark-bg: #0a0a0a;
+  --dark-surface: #1a1a2e;
+  --dark-card: #16213e;
+  --dark-border: #2d3748;
+
+  --text-primary: #ffffff;
+  --text-secondary: #cbd5e1;
+  --text-muted: #94a3b8;
+
+  /* Gradients */
+  --gradient-primary: linear-gradient(135deg, var(--neon-pink), var(--neon-cyan));
+  --gradient-secondary: linear-gradient(135deg, var(--neon-purple), var(--neon-yellow));
+  --gradient-dark: linear-gradient(135deg, var(--dark-bg), var(--dark-surface));
+
+  /* Shadows */
+  --shadow-glow: 0 0 20px rgba(255, 20, 147, 0.5);
+  --shadow-glow-cyan: 0 0 20px rgba(0, 255, 255, 0.5);
+  --shadow-card: 0 10px 30px rgba(0, 0, 0, 0.5);
+  --shadow-nav: 0 5px 20px rgba(0, 0, 0, 0.8);
+
+  /* Typography */
+  --font-primary: 'Orbitron', sans-serif;
+  --font-secondary: 'Cinzel', serif;
+  --font-mono: 'Source Code Pro', monospace;
+
+  /* Spacing */
+  --space-xs: 0.5rem;
+  --space-sm: 1rem;
+  --space-md: 1.5rem;
+  --space-lg: 2rem;
+  --space-xl: 3rem;
+
+  /* Border Radius */
+  --radius-sm: 0.5rem;
+  --radius-md: 1rem;
+  --radius-lg: 1.5rem;
+  --radius-xl: 2rem;
+  --radius-full: 50%;
+
+  /* Transitions */
+  --transition-fast: 0.2s ease;
+  --transition-normal: 0.3s ease;
+  --transition-slow: 0.5s ease;
+  --transition-bounce: 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+/* === RESET & BASE STYLES === */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background: var(--dark-bg);
+  color: var(--text-primary);
+  font-family: var(--font-primary);
+  line-height: 1.6;
+  overflow-x: hidden;
+  min-height: 100vh;
+}
+
+/* === TYPOGRAPHY === */
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-secondary);
+  font-weight: 700;
+  line-height: 1.2;
+  margin-bottom: var(--space-md);
+}
+
+h1 {
+  font-size: 3.5rem;
+  background: var(--gradient-primary);
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  text-shadow: var(--shadow-glow);
+}
+
+h2 {
+  font-size: 2.5rem;
+  color: var(--neon-cyan);
+}
+
+.neon-title {
+  font-family: var(--font-secondary);
+  font-size: 4rem;
+  font-weight: 900;
+  background: linear-gradient(45deg, var(--neon-pink), var(--neon-cyan), var(--neon-yellow));
+  background-size: 300% 300%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: neonPulse 4s ease-in-out infinite;
+  text-shadow: 0 0 30px rgba(255, 20, 147, 0.8);
+}
+
+/* === BUTTONS === */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-sm) var(--space-lg);
+  border: 2px solid transparent;
+  border-radius: var(--radius-lg);
+  font-family: var(--font-primary);
+  font-weight: 700;
+  font-size: 1rem;
+  text-decoration: none;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  cursor: pointer;
+  transition: all var(--transition-normal);
+  position: relative;
+  overflow: hidden;
+}
+
+.btn-primary {
+  background: var(--gradient-primary);
+  color: var(--dark-bg);
+  border-color: var(--neon-pink);
+  box-shadow: var(--shadow-glow);
+}
+
+.btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 30px rgba(255, 20, 147, 0.6);
+}
+
+.btn-secondary {
+  background: transparent;
+  color: var(--neon-cyan);
+  border-color: var(--neon-cyan);
+  box-shadow: var(--shadow-glow-cyan);
+}
+
+/* === CARDS === */
+.card {
+  background: var(--dark-card);
+  border: 1px solid var(--dark-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-lg);
+  backdrop-filter: blur(10px);
+  transition: all var(--transition-normal);
+  position: relative;
+  overflow: hidden;
+}
+
+.card:hover {
+  border-color: var(--neon-pink);
+  transform: translateY(-5px);
+  box-shadow: var(--shadow-glow), var(--shadow-card);
+}
+
+/* Animations */
+@keyframes neonPulse {
+  0%, 100% {
+    background-position: 0% 50%;
+    text-shadow: 0 0 20px rgba(255, 20, 147, 0.8);
+  }
+  50% {
+    background-position: 100% 50%;
+    text-shadow: 0 0 30px rgba(0, 255, 255, 0.8);
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.fade-in {
+  animation: fadeIn 0.8s ease-out;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .neon-title {
+    font-size: 2.5rem;
+  }
+  
+  h1 {
+    font-size: 2.5rem;
+  }
+}
