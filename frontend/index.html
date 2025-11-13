@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI_XANDRIA - Persona Economy on Somnia</title>
+  
+  <!-- Preload Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  
+  <!-- Favicon -->
+  <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+  
+  <!-- Meta Tags -->
+  <meta name="description" content="Create, Own, and Monetize AI Personas. Powered by Amazon Bedrock & Somnia Blockchain.">
+  <meta name="keywords" content="AI, NFT, Blockchain, Somnia, AWS, Bedrock">
+  
+  <!-- Open Graph -->
+  <meta property="og:title" content="AI_XANDRIA - Persona Economy">
+  <meta property="og:description" content="The Infrastructure Layer for Ownable AI Personas">
+  <meta property="og:type" content="website">
+  
+  <style>
+    /* Loading Screen */
+    #loading-screen {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(135deg, #0a0010 0%, #1a1a2e 100%);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      z-index: 10000;
+      transition: opacity 0.8s ease;
+    }
+
+    .loading-title {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 3rem;
+      font-weight: 800;
+      letter-spacing: 4px;
+      margin-bottom: 2rem;
+      background: linear-gradient(45deg, #ff00ff, #a020f0, #ff00ff);
+      background-size: 200% 200%;
+      background-clip: text;
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      animation: neonPulse 3s ease-in-out infinite;
+    }
+
+    @keyframes neonPulse {
+      0%, 100% { background-position: 0% 50%; }
+      50% { background-position: 100% 50%; }
+    }
+
+    .loading-subtitle {
+      color: #a020f0;
+      font-family: 'Orbitron', sans-serif;
+      margin-bottom: 2rem;
+    }
+
+    .loading-bar {
+      width: 300px;
+      height: 4px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 2px;
+      overflow: hidden;
+      margin-top: 2rem;
+    }
+
+    .loading-progress {
+      height: 100%;
+      background: linear-gradient(90deg, #ff00ff, #a020f0);
+      width: 0%;
+      animation: loadProgress 2s ease-in-out forwards;
+    }
+
+    @keyframes loadProgress {
+      0% { width: 0%; }
+      100% { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <!-- Loading Screen -->
+  <div id="loading-screen">
+    <h1 class="loading-title">AI_XANDRIA</h1>
+    <p class="loading-subtitle">Initializing Persona Portal...</p>
+    <div class="loading-bar">
+      <div class="loading-progress"></div>
+    </div>
+  </div>
+
+  <!-- React Root -->
+  <div id="root"></div>
+
+  <!-- React App -->
+  <script type="module" src="/src/main.jsx"></script>
+</body>
+</html>
