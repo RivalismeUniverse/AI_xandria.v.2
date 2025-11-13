@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { User, Persona } = require('../models');
+const { Op } = require('sequelize');
 const { generateToken, verifySignature } = require('../middleware/auth');
 const auth = require('../middleware/auth').auth;
 const logger = require('../utils/logger');
