@@ -1,6 +1,5 @@
-// MarketplaceListing.js
-const MarketplaceListing = (sequelize, DataTypes) => {
-  return sequelize.define('MarketplaceListing', {
+module.exports = (sequelize, DataTypes) => {
+  const MarketplaceListing = sequelize.define('MarketplaceListing', {
     id: {
       type: DataTypes.UUID,
       defaultValue: DataTypes.UUIDV4,
@@ -61,5 +60,6 @@ const MarketplaceListing = (sequelize, DataTypes) => {
       { fields: ['price'] }
     ]
   });
+  
+  return MarketplaceListing;
 };
-module.exports = { MarketplaceListing };
