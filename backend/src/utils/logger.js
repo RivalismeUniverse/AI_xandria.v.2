@@ -1,139 +1,160 @@
-// backend/src/utils/logger.js
-// Winston logger configuration for AI_XANDRIA
-// Handles logging to console and files
-
 const winston = require('winston');
-const path = require('path');
+const { CloudWatchLogsClient, PutLogEventsCommand } = require('@aws-sdk/client-cloudwatch-logs');
 
-// Define log levels
-const levels = {
-  error: 0,
-  warn: 1,
-  info: 2,
-  http: 3,
-  debug: 4
-};
-
-// Define colors for each level
-const colors = {
-  error: 'red',
-  warn: 'yellow',
-  info: 'green',
-  http: 'magenta',
-  debug: 'white'
-};
-
-// Tell winston to use our custom colors
-winston.addColors(colors);
-
-// Define log format
-const format = winston.format.combine(
-  winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss:ms' }),
-  winston.format.colorize({ all: true }),
-  winston.format.printf(
-    (info) => `${info.timestamp} ${info.level}: ${info.message}`
-  )
-);
-
-// Define which transports the logger should use
-const transports = [
-  // Console transport
-  new winston.transports.Console({
-    format: winston.format.combine(
-      winston.format.colorize(),
-      winston.format.simple()
-    )
-  }),
-  
-  // Error log file
-  new winston.transports.File({
-    filename: path.join(__dirname, '../../logs/error.log'),
-    level: 'error',
-    format: winston.format.combine(
-      winston.format.timestamp(),
-      winston.format.json()
-    ),
-    maxsize: 5242880, // 5MB
-    maxFiles: 5
-  }),
-  
-  // Combined log file
-  new winston.transports.File({
-    filename: path.join(__dirname, '../../logs/combined.log'),
-    format: winston.format.combine(
-      winston.format.timestamp(),
-      winston.format.json()
-    ),
-    maxsize: 5242880, // 5MB
-    maxFiles: 5
-  })
-];
-
-// Create logger instance
-const logger = winston.createLogger({
-  level: process.env.LOG_LEVEL || 'info',
-  levels,
-  format,
-  transports,
-  exitOnError: false
+// Initialize CloudWatch client
+const cloudWatchClient = new CloudWatchLogsClient({
+  region: process.env.AWS_REGION || 'us-east-1'
 });
 
-// Create stream for Morgan HTTP logging
-logger.stream = {
-  write: (message) => {
-    logger.http(message.trim());
+// Custom format for logs
+const logFormat = winston.format.combine(
+  winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+  winston.format.errors({ stack: true }),
+  winston.format.splat(),
+  winston.format.json()
+);
+
+// Create logger
+const logger = winston.createLogger({
+  level: process.env.LOG_LEVEL || 'info',
+  format: logFormat,
+  defaultMeta: { 
+    service: 'ai-xandria-backend',
+    environment: process.env.NODE_ENV 
+  },
+  transports: [
+    // Console output
+    new winston.transports.Console({
+      format: winston.format.combine(
+        winston.format.colorize(),
+        winston.format.printf(({ timestamp, level, message, ...metadata }) => {
+          let msg = `${timestamp} [${level}]: ${message}`;
+          if (Object.keys(metadata).length > 0) {
+            msg += ` ${JSON.stringify(metadata)}`;
+          }
+          return msg;
+        })
+      )
+    })
+  ]
+});
+
+// Add file transport in production
+if (process.env.NODE_ENV === 'production') {
+  logger.add(new winston.transports.File({ 
+    filename: 'logs/error.log', 
+    level: 'error' 
+  }));
+  logger.add(new winston.transports.File({ 
+    filename: 'logs/combined.log' 
+  }));
+}
+
+/**
+ * Send logs to AWS CloudWatch
+ */
+const sendToCloudWatch = async (logGroupName, logStreamName, message) => {
+  if (process.env.NODE_ENV !== 'production') {
+    return; // Only send to CloudWatch in production
+  }
+
+  try {
+    const params = {
+      logGroupName,
+      logStreamName,
+      logEvents: [
+        {
+          message: JSON.stringify(message),
+          timestamp: Date.now()
+        }
+      ]
+    };
+
+    await cloudWatchClient.send(new PutLogEventsCommand(params));
+  } catch (error) {
+    // Fail silently - don't break app if CloudWatch fails
+    console.error('CloudWatch logging failed:', error.message);
   }
 };
 
-// Add custom logging methods
-logger.logRequest = (req, res, responseTime) => {
-  logger.http(
-    `${req.method} ${req.originalUrl} ${res.statusCode} - ${responseTime}ms - ${req.user?.wallet_address || 'anonymous'}`
+/**
+ * Log battle event to CloudWatch
+ */
+logger.logBattle = async (battleId, event, data) => {
+  const message = {
+    battleId,
+    event,
+    timestamp: new Date().toISOString(),
+    ...data
+  };
+
+  logger.info(`Battle ${event}`, message);
+
+  await sendToCloudWatch(
+    '/ai-xandria/battles',
+    `battle-${battleId}`,
+    message
   );
 };
 
-logger.logError = (error, req = null) => {
-  const errorLog = {
-    message: error.message,
-    stack: error.stack,
-    statusCode: error.statusCode || 500
+/**
+ * Log evolution event to CloudWatch
+ */
+logger.logEvolution = async (personaId, changes) => {
+  const message = {
+    personaId,
+    changes,
+    timestamp: new Date().toISOString()
   };
 
-  if (req) {
-    errorLog.path = req.path;
-    errorLog.method = req.method;
-    errorLog.user = req.user?.wallet_address || 'anonymous';
-    errorLog.ip = req.ip;
-  }
+  logger.info('Persona evolution', message);
 
-  logger.error(JSON.stringify(errorLog));
+  await sendToCloudWatch(
+    '/ai-xandria/evolution',
+    `persona-${personaId}`,
+    message
+  );
 };
 
-logger.logBattle = (battleId, topic, persona1, persona2) => {
-  logger.info(`Battle created: ${battleId} | ${topic} | ${persona1} vs ${persona2}`);
+/**
+ * Log Bedrock API call
+ */
+logger.logBedrockCall = async (personaId, operation, tokens) => {
+  const message = {
+    personaId,
+    operation,
+    tokens,
+    timestamp: new Date().toISOString()
+  };
+
+  logger.info('Bedrock API call', message);
+
+  await sendToCloudWatch(
+    '/ai-xandria/bedrock',
+    'api-calls',
+    message
+  );
 };
 
-logger.logTransaction = (type, txHash, user, amount) => {
-  logger.info(`Transaction: ${type} | ${txHash} | User: ${user} | Amount: ${amount}`);
-};
+/**
+ * Log payment transaction
+ */
+logger.logPayment = async (userId, personaId, amount, txHash) => {
+  const message = {
+    userId,
+    personaId,
+    amount,
+    txHash,
+    timestamp: new Date().toISOString()
+  };
 
-logger.logEvolution = (personaId, changes) => {
-  logger.info(`Persona evolved: ${personaId} | Changes: ${JSON.stringify(changes)}`);
-};
+  logger.info('Payment processed', message);
 
-logger.logNFTMint = (tokenId, personaId, owner) => {
-  logger.info(`NFT minted: Token #${tokenId} | Persona: ${personaId} | Owner: ${owner}`);
+  await sendToCloudWatch(
+    '/ai-xandria/payments',
+    'transactions',
+    message
+  );
 };
-
-logger.logChatUnlock = (personaId, user, amount) => {
-  logger.info(`Chat unlocked: Persona ${personaId} | User: ${user} | Amount: ${amount}`);
-};
-
-// Create logs directory if it doesn't exist
-const fs = require('fs');
-const logsDir = path.join(__dirname, '../../logs');
-if (!fs.existsSync(logsDir)) {
-  fs.mkdirSync(logsDir, { recursive: true });
-}
 
 module.exports = logger;
