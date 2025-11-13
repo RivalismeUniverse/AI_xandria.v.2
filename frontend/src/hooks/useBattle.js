@@ -1,115 +1,102 @@
-import { useState, useEffect } from 'react'
-import { apiService } from '../services/api'
-import { useWallet } from './useWallet'
+import { useState, useEffect } from 'react';
+import { api } from '../services/api';
+import toast from 'react-hot-toast';
 
-export const useBattle = () => {
-  const [battles, setBattles] = useState([])
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
-  const { isConnected } = useWallet()
+export const useBattle = (battleId = null) => {
+  const [battle, setBattle] = useState(null);
+  const [battles, setBattles] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [voting, setVoting] = useState(false);
 
-  // Load battles on mount
   useEffect(() => {
-    loadBattles()
-  }, [])
+    if (battleId) {
+      fetchBattle(battleId);
+    }
+  }, [battleId]);
 
-  const loadBattles = async () => {
-    setLoading(true)
+  const fetchBattle = async (id) => {
+    setLoading(true);
     try {
-      const data = await apiService.getBattles()
-      setBattles(data)
-    } catch (err) {
-      setError('Failed to load battles')
-      console.error('Error loading battles:', err)
+      const data = await api.getBattle(id);
+      setBattle(data);
+      return data;
+    } catch (error) {
+      toast.error('Failed to load battle');
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
-  const createBattle = async (topic, personaIds = []) => {
-    if (!isConnected) {
-      throw new Error('Please connect your wallet first')
-    }
-
-    setLoading(true)
-    setError('')
-    
+  const fetchBattles = async (params = {}) => {
+    setLoading(true);
     try {
-      const battle = await apiService.createBattle({
-        topic,
-        personaIds,
-        createdAt: new Date().toISOString()
-      })
-      
-      setBattles(prev => [battle, ...prev])
-      return battle
-      
-    } catch (err) {
-      const errorMsg = err.message || 'Failed to create battle'
-      setError(errorMsg)
-      console.error('Error creating battle:', err)
-      throw err
+      const data = await api.getBattles(params);
+      setBattles(data.battles);
+      return data;
+    } catch (error) {
+      toast.error('Failed to load battles');
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
-  const voteOnBattle = async (battleId, personaId) => {
-    if (!isConnected) {
-      throw new Error('Please connect your wallet first')
-    }
-
-    setLoading(true)
+  const createBattle = async (persona1Id, persona2Id, topic) => {
+    setLoading(true);
     try {
-      const updatedBattle = await apiService.voteOnBattle(battleId, personaId)
-      
-      // Update the battle in local state
-      setBattles(prev => 
-        prev.map(battle => 
-          battle.id === battleId ? updatedBattle : battle
-        )
-      )
-      
-      return updatedBattle
-      
-    } catch (err) {
-      const errorMsg = err.message || 'Failed to vote on battle'
-      setError(errorMsg)
-      console.error('Error voting on battle:', err)
-      throw err
+      const newBattle = await api.createBattle({
+        persona1_id: persona1Id,
+        persona2_id: persona2Id,
+        topic
+      });
+      toast.success('Battle created! Arguments generating...');
+      return newBattle;
+    } catch (error) {
+      toast.error('Failed to create battle');
+      throw error;
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
-  const getBattle = async (id) => {
+  const vote = async (battleId, personaId) => {
+    setVoting(true);
     try {
-      return await apiService.getBattle(id)
-    } catch (err) {
-      setError('Failed to fetch battle details')
-      console.error('Error fetching battle:', err)
-      throw err
+      await api.voteBattle(battleId, personaId);
+      toast.success('Vote recorded!');
+      
+      // Refresh battle data
+      await fetchBattle(battleId);
+    } catch (error) {
+      toast.error(error.response?.data?.error || 'Failed to vote');
+      throw error;
+    } finally {
+      setVoting(false);
     }
-  }
+  };
 
-  const getBattleResults = async (battleId) => {
+  const completeBattle = async (battleId) => {
+    setLoading(true);
     try {
-      return await apiService.getBattleResults(battleId)
-    } catch (err) {
-      setError('Failed to fetch battle results')
-      console.error('Error fetching battle results:', err)
-      throw err
+      await api.completeBattle(battleId);
+      toast.success('Battle completed!');
+      await fetchBattle(battleId);
+    } catch (error) {
+      toast.error('Failed to complete battle');
+      throw error;
+    } finally {
+      setLoading(false);
     }
-  }
+  };
 
   return {
+    battle,
     battles,
     loading,
-    error,
+    voting,
+    fetchBattle,
+    fetchBattles,
     createBattle,
-    voteOnBattle,
-    getBattle,
-    getBattleResults,
-    refreshBattles: loadBattles
-  }
-}
+    vote,
+    completeBattle
+  };
+};
