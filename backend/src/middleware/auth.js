@@ -1,3 +1,4 @@
+// backend/src/middleware/auth.js
 const jwt = require('jsonwebtoken');
 const { User } = require('../models');
 const logger = require('../utils/logger');
@@ -109,20 +110,46 @@ const generateToken = (userId) => {
  * Verify wallet signature
  */
 const verifySignature = (message, signature, address) => {
-  const ethers = require('ethers');
-  
+  // ethers v6 exports verifyMessage directly; to be compatible with v5/v6 we try both
   try {
-    const recoveredAddress = ethers.verifyMessage(message, signature);
-    return recoveredAddress.toLowerCase() === address.toLowerCase();
+    const ethers = require('ethers');
+
+    // Prefer direct function if available
+    if (typeof ethers.verifyMessage === 'function') {
+      const recoveredAddress = ethers.verifyMessage(message, signature);
+      return recoveredAddress.toLowerCase() === address.toLowerCase();
+    }
+
+    // Otherwise use Wallet to recover (works for multiple ethers versions)
+    if (ethers.utils && typeof ethers.utils.verifyMessage === 'function') {
+      const recoveredAddress = ethers.utils.verifyMessage(message, signature);
+      return recoveredAddress.toLowerCase() === address.toLowerCase();
+    }
+
+    // fallback: try Wallet
+    if (ethers.Wallet && typeof ethers.Wallet.recover === 'function') {
+      const recoveredAddress = ethers.Wallet.recover(message, signature);
+      return recoveredAddress.toLowerCase() === address.toLowerCase();
+    }
+
+    logger.error('verifySignature: ethers API not compatible with this runtime');
+    return false;
   } catch (error) {
     logger.error('Signature verification failed:', error);
     return false;
   }
 };
 
-module.exports = {
-  auth,
-  optionalAuth,
-  generateToken,
-  verifySignature
-};
+/**
+ * EXPORTS
+ *
+ * - module.exports = auth
+ *   so `const auth = require('../middleware/auth')` returns a function (works with existing routes)
+ *
+ * - also attach named exports for backwards compatibility
+ */
+module.exports = auth;
+module.exports.auth = auth;
+module.exports.optionalAuth = optionalAuth;
+module.exports.generateToken = generateToken;
+module.exports.verifySignature = verifySignature;
