@@ -1,5 +1,5 @@
-// backend/src/models/PersonaAnalytics.js
-module.exports = (sequelize, DataTypes) => {
+// PersonaAnalytics.js
+const PersonaAnalytics = (sequelize, DataTypes) => {
   return sequelize.define('PersonaAnalytics', {
     id: {
       type: DataTypes.UUID,
@@ -42,10 +42,11 @@ module.exports = (sequelize, DataTypes) => {
     tableName: 'persona_analytics',
     timestamps: false,
     indexes: [
-      {
+      { 
         unique: true,
-        fields: ['persona_id', 'date']
+        fields: ['persona_id', 'date'] 
       }
     ]
   });
 };
+module.exports = { PersonaAnalytics };
