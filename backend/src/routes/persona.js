@@ -1,210 +1,293 @@
-// backend/src/routes/persona.js
-import express from 'express';
-import { auth } from '../middleware/auth.js';
-import { rateLimit } from '../middleware/rateLimit.js';
-import Persona from '../models/Persona.js';
-import AWSBedrockService from '../services/aws-bedrock-service.js';
-import AWSImageService from '../services/aws-image-service.js';
-import EvolutionService from '../services/evolutionService.js';
-
+const express = require('express');
 const router = express.Router();
+const { Persona, User } = require('../models');
+const auth = require('../middleware/auth');
+const logger = require('../utils/logger');
 
-// Get all personas
-router.get('/', rateLimit, async (req, res) => {
+/**
+ * GET /api/personas
+ * Get all personas with pagination
+ */
+router.get('/', async (req, res, next) => {
   try {
-    const { category, featured, limit = 20, offset = 0 } = req.query;
-    
-    const personas = await Persona.findByFilters({
-      category,
-      featured: featured === 'true',
+    const { 
+      page = 1, 
+      limit = 20, 
+      sortBy = 'elo_rating',
+      order = 'DESC',
+      search = ''
+    } = req.query;
+
+    const offset = (page - 1) * limit;
+
+    const where = search ? {
+      name: { [Op.iLike]: `%${search}%` }
+    } : {};
+
+    const personas = await Persona.findAndCountAll({
+      where,
       limit: parseInt(limit),
-      offset: parseInt(offset)
+      offset,
+      order: [[sortBy, order]],
+      include: [{
+        model: User,
+        as: 'creator',
+        attributes: ['id', 'username', 'wallet_address']
+      }]
     });
 
     res.json({
-      success: true,
-      data: personas,
-      pagination: {
-        total: personas.length,
-        limit: parseInt(limit),
-        offset: parseInt(offset)
-      }
+      personas: personas.rows,
+      total: personas.count,
+      page: parseInt(page),
+      totalPages: Math.ceil(personas.count / limit)
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: 'Failed to fetch personas',
-      message: error.message
-    });
+    next(error);
   }
 });
 
-// Get featured personas
-router.get('/featured', rateLimit, async (req, res) => {
+/**
+ * GET /api/personas/:id
+ * Get single persona details
+ */
+router.get('/:id', async (req, res, next) => {
   try {
-    const personas = await Persona.findFeatured();
-    
-    res.json({
-      success: true,
-      data: personas
+    const persona = await Persona.findByPk(req.params.id, {
+      include: [{
+        model: User,
+        as: 'creator',
+        attributes: ['id', 'username', 'wallet_address']
+      }]
     });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: 'Failed to fetch featured personas'
-    });
-  }
-});
 
-// Get single persona
-router.get('/:id', rateLimit, async (req, res) => {
-  try {
-    const persona = await Persona.findById(req.params.id);
-    
     if (!persona) {
-      return res.status(404).json({
-        success: false,
-        error: 'Persona not found'
+      return res.status(404).json({ error: 'Persona not found' });
+    }
+
+    res.json(persona);
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /api/personas
+ * Create new persona (requires auth)
+ */
+router.post('/', auth, async (req, res, next) => {
+  try {
+    const {
+      name,
+      description,
+      personality,
+      expertise,
+      intelligence = 50,
+      creativity = 50,
+      persuasiveness = 50,
+      avatar_url
+    } = req.body;
+
+    // Validation
+    if (!name || !personality) {
+      return res.status(400).json({ 
+        error: 'Name and personality are required' 
       });
     }
 
-    res.json({
-      success: true,
-      data: persona
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: 'Failed to fetch persona'
-    });
-  }
-});
-
-// Create new persona
-router.post('/', auth, rateLimit, async (req, res) => {
-  try {
-    const personaData = {
-      ...req.body,
-      creatorWallet: req.walletAddress
+    // Check trait bounds
+    const validateTrait = (trait, name) => {
+      if (trait < 0 || trait > 100) {
+        throw new Error(`${name} must be between 0 and 100`);
+      }
     };
 
-    // Generate AI avatar if requested
-    if (personaData.generateAvatar) {
-      const avatarResult = await AWSImageService.generatePersonaAvatar(personaData);
-      personaData.avatarUrl = avatarResult.imageUrl;
-      personaData.imageMetadata = avatarResult.metadata;
-    }
+    validateTrait(intelligence, 'Intelligence');
+    validateTrait(creativity, 'Creativity');
+    validateTrait(persuasiveness, 'Persuasiveness');
 
-    const persona = await Persona.create(personaData);
-
-    res.status(201).json({
-      success: true,
-      data: persona,
-      message: 'Persona created successfully'
+    const persona = await Persona.create({
+      creator_id: req.user.id,
+      name,
+      description,
+      personality,
+      expertise: expertise || [],
+      intelligence,
+      creativity,
+      persuasiveness,
+      avatar_url
     });
+
+    logger.info('Persona created', {
+      personaId: persona.id,
+      creatorId: req.user.id,
+      name
+    });
+
+    res.status(201).json(persona);
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: 'Failed to create persona',
-      message: error.message
-    });
+    next(error);
   }
 });
 
-// Update persona
-router.put('/:id', auth, rateLimit, async (req, res) => {
+/**
+ * PUT /api/personas/:id
+ * Update persona (owner only)
+ */
+router.put('/:id', auth, async (req, res, next) => {
   try {
-    const persona = await Persona.findById(req.params.id);
-    
+    const persona = await Persona.findByPk(req.params.id);
+
     if (!persona) {
-      return res.status(404).json({
-        success: false,
-        error: 'Persona not found'
+      return res.status(404).json({ error: 'Persona not found' });
+    }
+
+    // Check ownership
+    if (persona.creator_id !== req.user.id) {
+      return res.status(403).json({ 
+        error: 'You can only edit your own personas' 
       });
     }
 
-    // Verify ownership
-    if (persona.creatorWallet !== req.walletAddress) {
-      return res.status(403).json({
-        success: false,
-        error: 'Not authorized to update this persona'
+    // Can't edit minted NFTs
+    if (persona.is_minted) {
+      return res.status(400).json({ 
+        error: 'Cannot edit minted personas' 
       });
     }
 
-    const updatedPersona = await Persona.update(req.params.id, req.body);
+    const {
+      name,
+      description,
+      personality,
+      expertise,
+      avatar_url
+    } = req.body;
 
-    res.json({
-      success: true,
-      data: updatedPersona,
-      message: 'Persona updated successfully'
+    await persona.update({
+      name: name || persona.name,
+      description: description || persona.description,
+      personality: personality || persona.personality,
+      expertise: expertise || persona.expertise,
+      avatar_url: avatar_url || persona.avatar_url
     });
+
+    logger.info('Persona updated', {
+      personaId: persona.id,
+      updatedBy: req.user.id
+    });
+
+    res.json(persona);
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: 'Failed to update persona'
-    });
+    next(error);
   }
 });
 
-// Get persona evolution report
-router.get('/:id/evolution', rateLimit, async (req, res) => {
+/**
+ * DELETE /api/personas/:id
+ * Delete persona (owner only)
+ */
+router.delete('/:id', auth, async (req, res, next) => {
   try {
-    const persona = await Persona.findById(req.params.id);
-    
+    const persona = await Persona.findByPk(req.params.id);
+
     if (!persona) {
-      return res.status(404).json({
-        success: false,
-        error: 'Persona not found'
+      return res.status(404).json({ error: 'Persona not found' });
+    }
+
+    // Check ownership
+    if (persona.creator_id !== req.user.id) {
+      return res.status(403).json({ 
+        error: 'You can only delete your own personas' 
       });
     }
 
-    const battleResults = await Persona.getBattleResults(req.params.id);
-    const evolutionReport = EvolutionService.generateEvolutionReport(persona, battleResults);
+    // Can't delete minted NFTs
+    if (persona.is_minted) {
+      return res.status(400).json({ 
+        error: 'Cannot delete minted personas' 
+      });
+    }
 
-    res.json({
-      success: true,
-      data: evolutionReport
+    await persona.destroy();
+
+    logger.info('Persona deleted', {
+      personaId: persona.id,
+      deletedBy: req.user.id
     });
+
+    res.json({ message: 'Persona deleted successfully' });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: 'Failed to generate evolution report'
-    });
+    next(error);
   }
 });
 
-// Check NFT eligibility
-router.get('/:id/nft-eligibility', auth, rateLimit, async (req, res) => {
+/**
+ * GET /api/personas/:id/stats
+ * Get persona statistics
+ */
+router.get('/:id/stats', async (req, res, next) => {
   try {
-    const persona = await Persona.findById(req.params.id);
-    
+    const persona = await Persona.findByPk(req.params.id);
+
     if (!persona) {
-      return res.status(404).json({
-        success: false,
-        error: 'Persona not found'
-      });
+      return res.status(404).json({ error: 'Persona not found' });
     }
 
-    if (persona.creatorWallet !== req.walletAddress) {
-      return res.status(403).json({
-        success: false,
-        error: 'Not authorized'
-      });
-    }
+    const stats = {
+      battles: {
+        total: persona.total_battles,
+        wins: persona.total_wins,
+        winRate: persona.total_battles > 0 
+          ? (persona.total_wins / persona.total_battles * 100).toFixed(1)
+          : 0
+      },
+      rating: persona.elo_rating,
+      chats: persona.total_chats,
+      revenue: persona.revenue_earned,
+      traits: {
+        intelligence: persona.intelligence,
+        creativity: persona.creativity,
+        persuasiveness: persona.persuasiveness
+      }
+    };
 
-    const battleStats = await Persona.getBattleStats(req.params.id);
-    const eligibility = EvolutionService.shouldEvolveToNFT(persona, battleStats);
-
-    res.json({
-      success: true,
-      data: eligibility
-    });
+    res.json(stats);
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: 'Failed to check NFT eligibility'
-    });
+    next(error);
   }
 });
 
-export default router;
+/**
+ * GET /api/personas/leaderboard
+ * Get top personas by ELO rating
+ */
+router.get('/leaderboard', async (req, res, next) => {
+  try {
+    const { limit = 10 } = req.query;
+
+    const leaderboard = await Persona.findAll({
+      limit: parseInt(limit),
+      order: [['elo_rating', 'DESC']],
+      include: [{
+        model: User,
+        as: 'creator',
+        attributes: ['username', 'wallet_address']
+      }],
+      attributes: [
+        'id', 
+        'name', 
+        'elo_rating', 
+        'total_battles', 
+        'total_wins',
+        'avatar_url'
+      ]
+    });
+
+    res.json(leaderboard);
+  } catch (error) {
+    next(error);
+  }
+});
+
+module.exports = router;
