@@ -1,30 +1,50 @@
 {
   "name": "ai-xandria-frontend",
   "version": "2.0.0",
+  "description": "AI_XANDRIA Frontend - React + AWS Amplify",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "deploy": "amplify publish"
+    "test": "vitest",
+    "lint": "eslint . --ext js,jsx --report-unused-disable-directives --max-warnings 0",
+    "format": "prettier --write 'src/**/*.{js,jsx}'"
   },
   "dependencies": {
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "react-router-dom": "^6.15.0",
-    "ethers": "^6.7.0",
-    "axios": "^1.5.0",
-    "framer-motion": "^10.16.1",
-    "lucide-react": "^0.288.0",
-    "three": "^0.158.0"
+    "react-router-dom": "^6.20.1",
+    "ethers": "^6.9.0",
+    "axios": "^1.6.2",
+    "@heroicons/react": "^2.1.0",
+    "framer-motion": "^10.16.16",
+    "react-hot-toast": "^2.4.1",
+    "zustand": "^4.4.7",
+    "date-fns": "^3.0.6"
   },
   "devDependencies": {
-    "@types/react": "^18.2.15",
-    "@types/react-dom": "^18.2.7",
-    "@vitejs/plugin-react": "^4.0.3",
-    "vite": "^4.4.5",
-    "autoprefixer": "^10.4.14",
-    "postcss": "^8.4.27",
-    "tailwindcss": "^3.3.0"
-  }
+    "@types/react": "^18.2.43",
+    "@types/react-dom": "^18.2.17",
+    "@vitejs/plugin-react": "^4.2.1",
+    "vite": "^5.0.8",
+    "vitest": "^1.1.0",
+    "eslint": "^8.55.0",
+    "eslint-plugin-react": "^7.33.2",
+    "eslint-plugin-react-hooks": "^4.6.0",
+    "eslint-plugin-react-refresh": "^0.4.5",
+    "prettier": "^3.1.1",
+    "tailwindcss": "^3.4.0",
+    "autoprefixer": "^10.4.16",
+    "postcss": "^8.4.32"
+  },
+  "keywords": [
+    "react",
+    "vite",
+    "aws",
+    "amplify",
+    "web3"
+  ],
+  "author": "AI_XANDRIA Team",
+  "license": "MIT"
 }
