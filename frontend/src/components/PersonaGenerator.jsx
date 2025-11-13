@@ -1,311 +1,337 @@
-import React, { useState } from 'react'
-import { motion } from 'framer-motion'
-import { usePersona } from '../hooks/usePersona'
-import { Wand2, Sparkles, Image, Save } from 'lucide-react'
+import { useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { XMarkIcon } from '@heroicons/react/24/solid';
+import { usePersona } from '../hooks/usePersona';
+import toast from 'react-hot-toast';
 
-const PersonaGenerator = () => {
-  const { generatePersona, loading } = usePersona()
+export default function PersonaGenerator({ isOpen, onClose, onSuccess }) {
+  const { createPersona, loading } = usePersona();
+  
   const [formData, setFormData] = useState({
     name: '',
-    category: 'content-creator',
+    category: '',
     specialization: '',
     personality: '',
-    traits: '',
-    visualPrompt: ''
-  })
-  const [generatedPersona, setGeneratedPersona] = useState(null)
+    visualDescription: '',
+    intelligence: 50,
+    creativity: 50,
+    persuasiveness: 50
+  });
 
-  const categories = [
-    { value: 'content-creator', label: '🎨 Content Creator', emoji: '🎨' },
-    { value: 'academic', label: '🎓 Academic', emoji: '🎓' },
-    { value: 'tech', label: '💻 Technology', emoji: '💻' },
-    { value: 'mystical', label: '🔮 Mystical', emoji: '🔮' },
-    { value: 'motivational', label: '💪 Motivational', emoji: '💪' }
-  ]
+  const [preview, setPreview] = useState(null);
 
-  const handleInputChange = (field, value) => {
-    setFormData(prev => ({ ...prev, [field]: value }))
-  }
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({ ...prev, [name]: value }));
+  };
 
-  const handleGenerate = async () => {
-    if (!formData.name || !formData.specialization) {
-      alert('Please fill in at least Name and Specialization')
-      return
+  const generatePreview = () => {
+    if (!formData.name || !formData.category || !formData.specialization) {
+      toast.error('Please fill required fields');
+      return;
+    }
+
+    const expertise = formData.specialization.split(',').map(s => s.trim());
+    
+    setPreview({
+      name: formData.name,
+      description: `${formData.category} AI specialized in ${formData.specialization}`,
+      personality: formData.personality || 'Intelligent and adaptive',
+      expertise,
+      intelligence: formData.intelligence,
+      creativity: formData.creativity,
+      persuasiveness: formData.persuasiveness
+    });
+
+    toast.success('Preview generated!');
+  };
+
+  const handleCreate = async () => {
+    if (!preview) {
+      toast.error('Generate preview first');
+      return;
     }
 
     try {
-      const persona = await generatePersona(formData)
-      setGeneratedPersona(persona)
+      const persona = await createPersona(preview);
+      toast.success(`${persona.name} created successfully!`);
+      onSuccess && onSuccess(persona);
+      onClose();
     } catch (error) {
-      console.error('Failed to generate persona:', error)
-      alert('Failed to generate persona. Please try again.')
+      // Error handled by hook
     }
-  }
+  };
 
-  const handleSavePersona = async () => {
-    if (!generatedPersona) return
-    // Save persona logic would go here
-    alert('Persona saved successfully!')
-  }
+  if (!isOpen) return null;
 
   return (
-    <div className="persona-generator-container" style={{ 
-      padding: 'var(--space-xl)',
-      maxWidth: '1200px',
-      margin: '0 auto'
-    }}>
-      <div className="generator-header text-center mb-8">
-        <h1 className="neon-title">✨ PERSONA GENERATOR</h1>
-        <p style={{ color: 'var(--text-secondary)', fontSize: '1.2rem' }}>
-          Create your own AI persona with Amazon Bedrock - No coding required
-        </p>
-      </div>
-
-      <div className="generator-layout" style={{ 
-        display: 'grid',
-        gridTemplateColumns: '1fr 1fr',
-        gap: 'var(--space-xl)',
-        alignItems: 'start'
-      }}>
-        {/* Input Form */}
-        <motion.div 
-          className="input-section card"
-          initial={{ opacity: 0, x: -20 }}
-          animate={{ opacity: 1, x: 0 }}
+    <AnimatePresence>
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        className="fixed inset-0 bg-black bg-opacity-80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+        onClick={onClose}
+      >
+        <motion.div
+          initial={{ scale: 0.9, y: 20 }}
+          animate={{ scale: 1, y: 0 }}
+          exit={{ scale: 0.9, y: 20 }}
+          onClick={(e) => e.stopPropagation()}
+          className="cosmic-card w-full max-w-5xl max-h-[90vh] overflow-y-auto"
+          style={{
+            background: 'rgba(15, 0, 30, 0.98)',
+            backdropFilter: 'blur(25px)'
+          }}
         >
-          <h3 style={{ color: 'var(--neon-cyan)', marginBottom: 'var(--space-lg)' }}>
-            <Wand2 style={{ display: 'inline', marginRight: 'var(--space-sm)' }} />
-            Persona Details
-          </h3>
-
-          <div className="form-grid" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}>
-            <div>
-              <label style={{ color: 'var(--text-secondary)', display: 'block', marginBottom: 'var(--space-xs)' }}>
-                Persona Name *
-              </label>
-              <input
-                type="text"
-                value={formData.name}
-                onChange={(e) => handleInputChange('name', e.target.value)}
-                placeholder="e.g., Quantum Thinker"
-                style={{
-                  width: '100%',
-                  padding: 'var(--space-sm) var(--space-md)',
-                  background: 'var(--dark-bg)',
-                  border: '1px solid var(--dark-border)',
-                  borderRadius: 'var(--radius-md)',
-                  color: 'var(--text-primary)',
-                  fontFamily: 'var(--font-primary)'
-                }}
-              />
-            </div>
-
-            <div>
-              <label style={{ color: 'var(--text-secondary)', display: 'block', marginBottom: 'var(--space-xs)' }}>
-                Category
-              </label>
-              <select
-                value={formData.category}
-                onChange={(e) => handleInputChange('category', e.target.value)}
-                style={{
-                  width: '100%',
-                  padding: 'var(--space-sm) var(--space-md)',
-                  background: 'var(--dark-bg)',
-                  border: '1px solid var(--dark-border)',
-                  borderRadius: 'var(--radius-md)',
-                  color: 'var(--text-primary)',
-                  fontFamily: 'var(--font-primary)'
-                }}
-              >
-                {categories.map(cat => (
-                  <option key={cat.value} value={cat.value}>
-                    {cat.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label style={{ color: 'var(--text-secondary)', display: 'block', marginBottom: 'var(--space-xs)' }}>
-                Specialization *
-              </label>
-              <input
-                type="text"
-                value={formData.specialization}
-                onChange={(e) => handleInputChange('specialization', e.target.value)}
-                placeholder="e.g., AI Ethics, Quantum Physics, Digital Marketing"
-                style={{
-                  width: '100%',
-                  padding: 'var(--space-sm) var(--space-md)',
-                  background: 'var(--dark-bg)',
-                  border: '1px solid var(--dark-border)',
-                  borderRadius: 'var(--radius-md)',
-                  color: 'var(--text-primary)',
-                  fontFamily: 'var(--font-primary)'
-                }}
-              />
-            </div>
-
-            <div>
-              <label style={{ color: 'var(--text-secondary)', display: 'block', marginBottom: 'var(--space-xs)' }}>
-                Personality Traits
-              </label>
-              <input
-                type="text"
-                value={formData.traits}
-                onChange={(e) => handleInputChange('traits', e.target.value)}
-                placeholder="e.g., Witty, Analytical, Creative, Empathetic"
-                style={{
-                  width: '100%',
-                  padding: 'var(--space-sm) var(--space-md)',
-                  background: 'var(--dark-bg)',
-                  border: '1px solid var(--dark-border)',
-                  borderRadius: 'var(--radius-md)',
-                  color: 'var(--text-primary)',
-                  fontFamily: 'var(--font-primary)'
-                }}
-              />
-            </div>
-
-            <div>
-              <label style={{ color: 'var(--text-secondary)', display: 'block', marginBottom: 'var(--space-xs)' }}>
-                <Image style={{ display: 'inline', marginRight: 'var(--space-xs)' }} size={16} />
-                Visual Appearance
-              </label>
-              <textarea
-                value={formData.visualPrompt}
-                onChange={(e) => handleInputChange('visualPrompt', e.target.value)}
-                placeholder="Describe how your persona looks (e.g., futuristic scholar with glowing eyes, wearing digital robes)"
-                rows="3"
-                style={{
-                  width: '100%',
-                  padding: 'var(--space-sm) var(--space-md)',
-                  background: 'var(--dark-bg)',
-                  border: '1px solid var(--dark-border)',
-                  borderRadius: 'var(--radius-md)',
-                  color: 'var(--text-primary)',
-                  fontFamily: 'var(--font-primary)',
-                  resize: 'vertical'
-                }}
-              />
-            </div>
-
+          {/* Header */}
+          <div className="sticky top-0 z-10 p-6 flex justify-between items-center"
+               style={{
+                 background: 'rgba(15, 0, 30, 0.98)',
+                 backdropFilter: 'blur(25px)',
+                 borderBottom: '1px solid rgba(255, 0, 255, 0.3)'
+               }}>
+            <h3 className="cosmic-text text-2xl font-bold">
+              🎨 Create Your AI Persona
+            </h3>
             <button
-              className="btn btn-primary"
-              onClick={handleGenerate}
-              disabled={loading || !formData.name || !formData.specialization}
-              style={{ marginTop: 'var(--space-md)' }}
+              onClick={onClose}
+              className="w-10 h-10 flex items-center justify-center rounded-full transition-all hover:bg-opacity-20"
+              style={{
+                color: '#ff00ff',
+                background: 'rgba(255, 0, 255, 0.1)'
+              }}
             >
-              <Sparkles style={{ marginRight: 'var(--space-sm)' }} size={16} />
-              {loading ? 'Generating...' : 'Generate Persona'}
+              <XMarkIcon className="w-6 h-6" />
             </button>
           </div>
-        </motion.div>
 
-        {/* Preview Section */}
-        <motion.div 
-          className="preview-section"
-          initial={{ opacity: 0, x: 20 }}
-          animate={{ opacity: 1, x: 0 }}
-        >
-          {generatedPersona ? (
-            <div className="preview-card card">
-              <h3 style={{ color: 'var(--neon-pink)', marginBottom: 'var(--space-lg)' }}>
-                Generated Persona
+          {/* Form Grid */}
+          <div className="grid md:grid-cols-2 gap-8 p-6">
+            {/* LEFT: Input Form */}
+            <div className="space-y-4">
+              <div>
+                <label className="block mb-2 font-semibold" style={{ color: '#ff00ff' }}>
+                  📝 Persona Name *
+                </label>
+                <input
+                  type="text"
+                  name="name"
+                  value={formData.name}
+                  onChange={handleChange}
+                  placeholder="e.g., NeonGhost, Master Seijuro"
+                  className="cosmic-input"
+                />
+              </div>
+
+              <div>
+                <label className="block mb-2 font-semibold" style={{ color: '#ff00ff' }}>
+                  🎭 Category *
+                </label>
+                <select
+                  name="category"
+                  value={formData.category}
+                  onChange={handleChange}
+                  className="cosmic-input"
+                >
+                  <option value="">Select Category</option>
+                  <option value="Content Creator">Content Creator</option>
+                  <option value="Academic">Academic</option>
+                  <option value="Business">Business</option>
+                  <option value="Creative">Creative</option>
+                  <option value="Custom">Custom</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block mb-2 font-semibold" style={{ color: '#ff00ff' }}>
+                  💼 Specialization *
+                </label>
+                <input
+                  type="text"
+                  name="specialization"
+                  value={formData.specialization}
+                  onChange={handleChange}
+                  placeholder="e.g., Quantum Physics, Poetry"
+                  className="cosmic-input"
+                />
+              </div>
+
+              <div>
+                <label className="block mb-2 font-semibold" style={{ color: '#ff00ff' }}>
+                  🧠 Personality Traits
+                </label>
+                <textarea
+                  name="personality"
+                  value={formData.personality}
+                  onChange={handleChange}
+                  rows="3"
+                  placeholder="Describe personality, skills, expertise..."
+                  className="cosmic-input resize-none"
+                />
+              </div>
+
+              {/* Trait Sliders */}
+              <div className="space-y-3">
+                <TraitSlider
+                  label="Intelligence"
+                  value={formData.intelligence}
+                  onChange={(val) => setFormData(prev => ({ ...prev, intelligence: val }))}
+                  color="#00ffff"
+                />
+                <TraitSlider
+                  label="Creativity"
+                  value={formData.creativity}
+                  onChange={(val) => setFormData(prev => ({ ...prev, creativity: val }))}
+                  color="#ff00ff"
+                />
+                <TraitSlider
+                  label="Persuasiveness"
+                  value={formData.persuasiveness}
+                  onChange={(val) => setFormData(prev => ({ ...prev, persuasiveness: val }))}
+                  color="#00ff00"
+                />
+              </div>
+
+              <button
+                onClick={generatePreview}
+                disabled={loading}
+                className="neon-btn w-full"
+                style={{
+                  background: 'linear-gradient(135deg, #00ff00, #00dd00)',
+                  border: 'none',
+                  color: '#000'
+                }}
+              >
+                ✨ Generate Preview
+              </button>
+            </div>
+
+            {/* RIGHT: Preview */}
+            <div>
+              <h3 className="cosmic-text text-xl font-bold mb-4">
+                👁️ Preview
               </h3>
-              
-              <div className="persona-preview">
-                <div className="preview-header text-center mb-6">
-                  {generatedPersona.avatarUrl && (
-                    <img 
-                      src={generatedPersona.avatarUrl} 
-                      alt={generatedPersona.name}
-                      style={{
-                        width: '120px',
-                        height: '120px',
-                        borderRadius: 'var(--radius-full)',
-                        border: '3px solid var(--neon-cyan)',
-                        margin: '0 auto var(--space-md)'
-                      }}
-                    />
-                  )}
-                  <h4 style={{ color: 'var(--neon-cyan)' }}>{generatedPersona.name}</h4>
-                  <p style={{ color: 'var(--text-secondary)' }}>{generatedPersona.tagline}</p>
-                </div>
-
-                <div className="preview-details" style={{ textAlign: 'left' }}>
-                  <div style={{ marginBottom: 'var(--space-md)' }}>
-                    <strong style={{ color: 'var(--neon-pink)' }}>Description:</strong>
-                    <p style={{ color: 'var(--text-primary)', marginTop: 'var(--space-xs)' }}>
-                      {generatedPersona.description}
+              <div className="cosmic-card p-6 min-h-[300px]"
+                   style={{ background: 'rgba(0, 0, 0, 0.4)' }}>
+                {preview ? (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                  >
+                    <h4 className="text-xl font-bold mb-2" style={{ color: '#00ffff' }}>
+                      {preview.name}
+                    </h4>
+                    <p className="mb-4" style={{ color: '#cbd5e1' }}>
+                      {preview.description}
                     </p>
-                  </div>
-
-                  <div style={{ marginBottom: 'var(--space-md)' }}>
-                    <strong style={{ color: 'var(--neon-pink)' }}>Personality:</strong>
-                    <p style={{ color: 'var(--text-primary)', marginTop: 'var(--space-xs)' }}>
-                      {generatedPersona.personality}
-                    </p>
-                  </div>
-
-                  {generatedPersona.traits && generatedPersona.traits.length > 0 && (
-                    <div style={{ marginBottom: 'var(--space-md)' }}>
-                      <strong style={{ color: 'var(--neon-pink)' }}>Traits:</strong>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-xs)', marginTop: 'var(--space-xs)' }}>
-                        {generatedPersona.traits.map((trait, index) => (
-                          <span 
-                            key={index}
+                    
+                    <div className="mb-4">
+                      <span className="text-sm font-semibold" style={{ color: '#ff00ff' }}>
+                        Expertise:
+                      </span>
+                      <div className="flex flex-wrap gap-2 mt-2">
+                        {preview.expertise.map((exp, i) => (
+                          <span
+                            key={i}
+                            className="px-3 py-1 rounded-full text-sm"
                             style={{
-                              background: 'rgba(0, 255, 255, 0.2)',
-                              border: '1px solid var(--neon-cyan)',
-                              padding: 'var(--space-xs) var(--space-sm)',
-                              borderRadius: 'var(--radius-full)',
-                              fontSize: '0.8rem',
-                              color: 'var(--neon-cyan)'
+                              background: 'rgba(255, 0, 255, 0.2)',
+                              border: '1px solid rgba(255, 0, 255, 0.4)',
+                              color: '#ff00ff'
                             }}
                           >
-                            {trait}
+                            {exp}
                           </span>
                         ))}
                       </div>
                     </div>
-                  )}
 
-                  <button
-                    className="btn btn-secondary"
-                    onClick={handleSavePersona}
-                    style={{ width: '100%', marginTop: 'var(--space-lg)' }}
-                  >
-                    <Save style={{ marginRight: 'var(--space-sm)' }} size={16} />
-                    Save & Mint as NFT
-                  </button>
-                </div>
+                    <div className="space-y-2">
+                      <PreviewTrait label="Intelligence" value={preview.intelligence} color="#00ffff" />
+                      <PreviewTrait label="Creativity" value={preview.creativity} color="#ff00ff" />
+                      <PreviewTrait label="Persuasiveness" value={preview.persuasiveness} color="#00ff00" />
+                    </div>
+                  </motion.div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center h-full text-center">
+                    <p style={{ color: '#888' }}>
+                      🎭 Your AI persona will appear here...
+                    </p>
+                    <p className="text-sm mt-2" style={{ color: '#666' }}>
+                      Fill the form and click "Generate" to create your unique persona!
+                    </p>
+                  </div>
+                )}
               </div>
+
+              {preview && (
+                <button
+                  onClick={handleCreate}
+                  disabled={loading}
+                  className="neon-btn w-full mt-4"
+                  style={{
+                    borderColor: '#ff00ff',
+                    color: '#ff00ff'
+                  }}
+                >
+                  {loading ? '⏳ Creating...' : '🎫 Create Persona'}
+                </button>
+              )}
             </div>
-          ) : (
-            <div className="empty-preview card" style={{ 
-              height: '400px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              textAlign: 'center',
-              background: 'var(--dark-surface)'
-            }}>
-              <div>
-                <Sparkles size={48} style={{ color: 'var(--text-muted)', marginBottom: 'var(--space-md)' }} />
-                <p style={{ color: 'var(--text-muted)' }}>
-                  Your AI persona will appear here...
-                </p>
-                <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginTop: 'var(--space-sm)' }}>
-                  Fill the form and click "Generate" to create your unique persona
-                </p>
-              </div>
-            </div>
-          )}
+          </div>
         </motion.div>
-      </div>
-    </div>
-  )
+      </motion.div>
+    </AnimatePresence>
+  );
 }
 
-export default PersonaGenerator
+function TraitSlider({ label, value, onChange, color }) {
+  return (
+    <div>
+      <div className="flex justify-between mb-2">
+        <span className="text-sm font-semibold" style={{ color }}>
+          {label}
+        </span>
+        <span className="text-sm font-bold" style={{ color }}>
+          {value}/100
+        </span>
+      </div>
+      <input
+        type="range"
+        min="0"
+        max="100"
+        value={value}
+        onChange={(e) => onChange(parseInt(e.target.value))}
+        className="w-full h-2 rounded-full appearance-none cursor-pointer"
+        style={{
+          background: `linear-gradient(90deg, ${color} 0%, ${color} ${value}%, rgba(255,255,255,0.1) ${value}%, rgba(255,255,255,0.1) 100%)`
+        }}
+      />
+    </div>
+  );
+}
+
+function PreviewTrait({ label, value, color }) {
+  return (
+    <div>
+      <div className="flex justify-between text-xs mb-1" style={{ color: '#cbd5e1' }}>
+        <span>{label}</span>
+        <span className="font-semibold">{value}/100</span>
+      </div>
+      <div className="w-full h-2 rounded-full overflow-hidden"
+           style={{ background: 'rgba(255, 255, 255, 0.1)' }}>
+        <motion.div
+          initial={{ width: 0 }}
+          animate={{ width: `${value}%` }}
+          transition={{ duration: 0.6 }}
+          className="h-full"
+          style={{
+            background: `linear-gradient(90deg, ${color}, ${color}aa)`,
+            boxShadow: `0 0 10px ${color}`
+          }}
+        />
+      </div>
+    </div>
+  );
+}
