@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { Persona, MarketplaceListing, User } = require('../models');
+const { Op } = require('sequelize');
 const s3Service = require('../services/s3-service');
 const blockchainService = require('../services/blockchainService');
 const auth = require('../middleware/auth');
