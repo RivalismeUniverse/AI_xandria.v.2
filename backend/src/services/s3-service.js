@@ -1,100 +1,126 @@
-// backend/src/services/s3-service.js
-import { PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
-import { s3Client, AWS_CONFIG } from '../config/aws-config.js';
-import { logger } from '../utils/logger.js';
+const { S3Client, PutObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
+const logger = require('../utils/logger');
 
-export class S3Service {
+class S3Service {
   constructor() {
-    this.buckets = AWS_CONFIG.s3Buckets;
+    this.client = new S3Client({
+      region: process.env.AWS_REGION || 'us-east-1'
+    });
+    this.bucket = process.env.S3_BUCKET || 'ai-xandria-metadata';
   }
 
-  async uploadPersonaAvatar(imageBuffer, personaName, contentType = 'image/png') {
-    const key = `personas/${personaName.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}.png`;
-    
-    const command = new PutObjectCommand({
-      Bucket: this.buckets.personas,
-      Key: key,
-      Body: imageBuffer,
-      ContentType: contentType,
-      ACL: 'public-read',
-      Metadata: {
-        'uploaded-by': 'ai-xandria-backend',
-        'persona-name': personaName
-      }
-    });
-
+  /**
+   * Upload persona metadata to S3
+   */
+  async uploadMetadata(personaId, metadata) {
     try {
-      await s3Client.send(command);
-      const url = `https://${this.buckets.personas}.s3.${AWS_CONFIG.region}.amazonaws.com/${key}`;
+      const key = `personas/${personaId}/metadata.json`;
       
-      logger.info('Avatar uploaded to S3', { personaName, url });
-      return url;
+      const command = new PutObjectCommand({
+        Bucket: this.bucket,
+        Key: key,
+        Body: JSON.stringify(metadata, null, 2),
+        ContentType: 'application/json',
+        ACL: 'public-read'
+      });
 
+      await this.client.send(command);
+
+      const url = `https://${this.bucket}.s3.${process.env.AWS_REGION}.amazonaws.com/${key}`;
+
+      logger.info('Metadata uploaded to S3', {
+        personaId,
+        url
+      });
+
+      return url;
     } catch (error) {
       logger.error('S3 upload failed:', error);
-      throw new Error(`Failed to upload avatar: ${error.message}`);
+      throw new Error('Failed to upload metadata to S3');
     }
   }
 
-  async uploadNFTMetadata(metadata, tokenId) {
-    const key = `nfts/${tokenId}/metadata.json`;
-    const metadataString = JSON.stringify(metadata, null, 2);
-
-    const command = new PutObjectCommand({
-      Bucket: this.buckets.nfts,
-      Key: key,
-      Body: metadataString,
-      ContentType: 'application/json',
-      ACL: 'public-read'
-    });
-
+  /**
+   * Upload avatar image to S3
+   */
+  async uploadAvatar(personaId, imageBuffer, contentType) {
     try {
-      await s3Client.send(command);
-      const url = `https://${this.buckets.nfts}.s3.${AWS_CONFIG.region}.amazonaws.com/${key}`;
-      
+      const extension = contentType.split('/')[1];
+      const key = `personas/${personaId}/avatar.${extension}`;
+
+      const command = new PutObjectCommand({
+        Bucket: this.bucket,
+        Key: key,
+        Body: imageBuffer,
+        ContentType: contentType,
+        ACL: 'public-read'
+      });
+
+      await this.client.send(command);
+
+      const url = `https://${this.bucket}.s3.${process.env.AWS_REGION}.amazonaws.com/${key}`;
+
+      logger.info('Avatar uploaded to S3', {
+        personaId,
+        url
+      });
+
       return url;
-
     } catch (error) {
-      logger.error('NFT metadata upload failed:', error);
-      throw new Error('Failed to upload NFT metadata');
+      logger.error('S3 avatar upload failed:', error);
+      throw new Error('Failed to upload avatar to S3');
     }
   }
 
-  async uploadBattleData(battleId, battleData) {
-    const key = `battles/${battleId}/data.json`;
+  /**
+   * Get metadata from S3
+   */
+  async getMetadata(personaId) {
+    try {
+      const key = `personas/${personaId}/metadata.json`;
+
+      const command = new GetObjectCommand({
+        Bucket: this.bucket,
+        Key: key
+      });
+
+      const response = await this.client.send(command);
+      const body = await response.Body.transformToString();
+      
+      return JSON.parse(body);
+    } catch (error) {
+      logger.error('S3 get metadata failed:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Generate pre-signed URL for avatar upload
+   */
+  async getUploadUrl(personaId, contentType) {
+    const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
     
-    const command = new PutObjectCommand({
-      Bucket: this.buckets.battles,
-      Key: key,
-      Body: JSON.stringify(battleData),
-      ContentType: 'application/json',
-      ACL: 'public-read'
-    });
-
     try {
-      await s3Client.send(command);
-      return `https://${this.buckets.battles}.s3.${AWS_CONFIG.region}.amazonaws.com/${key}`;
+      const extension = contentType.split('/')[1];
+      const key = `personas/${personaId}/avatar.${extension}`;
 
+      const command = new PutObjectCommand({
+        Bucket: this.bucket,
+        Key: key,
+        ContentType: contentType
+      });
+
+      const url = await getSignedUrl(this.client, command, { expiresIn: 3600 });
+
+      return {
+        upload_url: url,
+        public_url: `https://${this.bucket}.s3.${process.env.AWS_REGION}.amazonaws.com/${key}`
+      };
     } catch (error) {
-      logger.error('Battle data upload failed:', error);
-      throw new Error('Failed to upload battle data');
-    }
-  }
-
-  async deleteObject(bucket, key) {
-    const command = new DeleteObjectCommand({
-      Bucket: bucket,
-      Key: key
-    });
-
-    try {
-      await s3Client.send(command);
-      logger.info('S3 object deleted', { bucket, key });
-    } catch (error) {
-      logger.error('S3 delete failed:', error);
-      throw new Error('Failed to delete S3 object');
+      logger.error('Failed to generate upload URL:', error);
+      throw new Error('Failed to generate upload URL');
     }
   }
 }
 
-export default new S3Service();
+module.exports = new S3Service();
