@@ -1,5 +1,5 @@
-// backend/src/models/EvolutionLog.js
-module.exports = (sequelize, DataTypes) => {
+// EvolutionLog.js
+const EvolutionLog = (sequelize, DataTypes) => {
   return sequelize.define('EvolutionLog', {
     id: {
       type: DataTypes.UUID,
@@ -16,7 +16,6 @@ module.exports = (sequelize, DataTypes) => {
     },
     battle_id: {
       type: DataTypes.UUID,
-      allowNull: true,
       references: {
         model: 'battles',
         key: 'id'
@@ -50,3 +49,4 @@ module.exports = (sequelize, DataTypes) => {
     ]
   });
 };
+module.exports = { EvolutionLog };
