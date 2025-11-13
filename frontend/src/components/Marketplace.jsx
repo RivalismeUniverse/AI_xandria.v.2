@@ -1,271 +1,213 @@
-import React, { useState, useEffect } from 'react'
-import { motion } from 'framer-motion'
-import { useWallet } from '../hooks/useWallet'
-import { ShoppingCart, Coins, TrendingUp, Users } from 'lucide-react'
+import { useState, useEffect } from 'react';
+import { motion } from 'framer-motion';
+import { ShoppingBagIcon, SparklesIcon } from '@heroicons/react/24/solid';
+import { api } from '../services/api';
+import { useWallet } from '../hooks/useWallet';
+import PersonaCard from './PersonaCard';
+import toast from 'react-hot-toast';
 
-const Marketplace = () => {
-  const { isConnected, connectWallet } = useWallet()
-  const [nfts, setNfts] = useState([])
-  const [filter, setFilter] = useState('all')
-  const [sortBy, setSortBy] = useState('price')
-
-  // Mock data - in real app, this would come from blockchain
-  const mockNFTs = [
-    {
-      id: 1,
-      name: "■ EINSTEIN",
-      description: "Genius physicist AI persona",
-      image: "https://api.dicebear.com/7.x/bottts/svg?seed=einstein",
-      price: "0.5",
-      currency: "STT",
-      seller: "0x1234...5678",
-      traits: ["Intelligence: 95", "Creativity: 88", "Wisdom: 92"],
-      battles: 45,
-      wins: 38,
-      rating: 4.8
-    },
-    {
-      id: 2,
-      name: "■ SOLARA",
-      description: "Healing and spiritual AI guide",
-      image: "https://api.dicebear.com/7.x/bottts/svg?seed=solara",
-      price: "0.3",
-      currency: "STT",
-      seller: "0x8765...4321",
-      traits: ["Empathy: 98", "Wisdom: 85", "Creativity: 90"],
-      battles: 32,
-      wins: 25,
-      rating: 4.6
-    }
-  ]
+export default function Marketplace() {
+  const { isConnected } = useWallet();
+  const [listings, setListings] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState('all');
 
   useEffect(() => {
-    setNfts(mockNFTs)
-  }, [])
+    loadListings();
+  }, [filter]);
 
-  const handlePurchase = async (nft) => {
-    if (!isConnected) {
-      await connectWallet()
-      return
+  const loadListings = async () => {
+    setLoading(true);
+    try {
+      const data = await api.getMarketplaceListings({
+        sort: filter === 'price_low' ? 'price' : 'created_at',
+        order: filter === 'price_high' ? 'DESC' : 'ASC'
+      });
+      setListings(data.listings);
+    } catch (error) {
+      toast.error('Failed to load marketplace');
+    } finally {
+      setLoading(false);
     }
-    
-    // In real implementation, this would call smart contract
-    alert(`Purchasing ${nft.name} for ${nft.price} ${nft.currency}`)
-  }
+  };
 
-  const filteredNFTs = nfts.filter(nft => {
-    if (filter === 'all') return true
-    if (filter === 'high-rated') return nft.rating >= 4.5
-    if (filter === 'battle-proven') return nft.battles > 20
-    return true
-  })
+  const handleBuy = async (listingId) => {
+    if (!isConnected) {
+      toast.error('Please connect wallet first');
+      return;
+    }
 
-  const sortedNFTs = [...filteredNFTs].sort((a, b) => {
-    if (sortBy === 'price') return parseFloat(a.price) - parseFloat(b.price)
-    if (sortBy === 'rating') return b.rating - a.rating
-    if (sortBy === 'battles') return b.battles - a.battles
-    return 0
-  })
+    try {
+      // In production: process payment first
+      const mockTxHash = '0x' + Math.random().toString(16).substring(2);
+      
+      await api.buyListing(listingId, { payment_tx_hash: mockTxHash });
+      toast.success('NFT purchased successfully!');
+      loadListings();
+    } catch (error) {
+      toast.error('Purchase failed');
+    }
+  };
 
   return (
-    <div className="marketplace-container" style={{ padding: 'var(--space-xl)' }}>
-      <div className="marketplace-header text-center mb-8">
-        <h1 className="neon-title">🛒 MARKETPLACE</h1>
-        <p style={{ color: 'var(--text-secondary)', fontSize: '1.2rem' }}>
-          Buy and sell AI personas as NFTs on Somnia blockchain
+    <div className="min-h-screen p-8">
+      {/* Header */}
+      <div className="max-w-7xl mx-auto mb-8">
+        <motion.h1
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="cosmic-text text-5xl font-black mb-4"
+        >
+          🏪 NFT Marketplace
+        </motion.h1>
+        <p className="text-xl" style={{ color: '#cbd5e1' }}>
+          Trade AI Personas on Somnia Blockchain
         </p>
-      </div>
 
-      {/* Stats */}
-      <div className="marketplace-stats" style={{ 
-        display: 'grid',
-        gridTemplateColumns: 'repeat(4, 1fr)',
-        gap: 'var(--space-md)',
-        marginBottom: 'var(--space-xl)'
-      }}>
-        <div className="stat-card card text-center">
-          <Coins size={24} style={{ color: 'var(--neon-yellow)', marginBottom: 'var(--space-sm)' }} />
-          <h3 style={{ color: 'var(--neon-cyan)', margin: 0 }}>124</h3>
-          <p style={{ color: 'var(--text-muted)', margin: 0 }}>NFTs Listed</p>
-        </div>
-        <div className="stat-card card text-center">
-          <TrendingUp size={24} style={{ color: 'var(--neon-green)', marginBottom: 'var(--space-sm)' }} />
-          <h3 style={{ color: 'var(--neon-cyan)', margin: 0 }}>47.2K</h3>
-          <p style={{ color: 'var(--text-muted)', margin: 0 }}>STT Volume</p>
-        </div>
-        <div className="stat-card card text-center">
-          <Users size={24} style={{ color: 'var(--neon-purple)', marginBottom: 'var(--space-sm)' }} />
-          <h3 style={{ color: 'var(--neon-cyan)', margin: 0 }}>892</h3>
-          <p style={{ color: 'var(--text-muted)', margin: 0 }}>Active Traders</p>
-        </div>
-        <div className="stat-card card text-center">
-          <ShoppingCart size={24} style={{ color: 'var(--neon-pink)', marginBottom: 'var(--space-sm)' }} />
-          <h3 style={{ color: 'var(--neon-cyan)', margin: 0 }}>56</h3>
-          <p style={{ color: 'var(--text-muted)', margin: 0 }}>Sales Today</p>
+        {/* Filters */}
+        <div className="flex gap-3 mt-6">
+          {['all', 'recent', 'price_low', 'price_high'].map((f) => (
+            <button
+              key={f}
+              onClick={() => setFilter(f)}
+              className="neon-btn"
+              style={{
+                background: filter === f
+                  ? 'linear-gradient(135deg, #ff00ff, #a020f0)'
+                  : 'rgba(255, 0, 255, 0.1)',
+                color: filter === f ? '#fff' : '#ff00ff',
+                border: filter === f ? 'none' : '2px solid #ff00ff'
+              }}
+            >
+              {f.replace('_', ' ').toUpperCase()}
+            </button>
+          ))}
         </div>
       </div>
 
-      {/* Filters */}
-      <div className="filters card" style={{ 
-        display: 'flex',
-        gap: 'var(--space-md)',
-        marginBottom: 'var(--space-lg)',
-        flexWrap: 'wrap'
-      }}>
-        <select
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          style={{
-            padding: 'var(--space-sm) var(--space-md)',
-            background: 'var(--dark-bg)',
-            border: '1px solid var(--dark-border)',
-            borderRadius: 'var(--radius-md)',
-            color: 'var(--text-primary)',
-            fontFamily: 'var(--font-primary)'
-          }}
-        >
-          <option value="all">All NFTs</option>
-          <option value="high-rated">High Rated (4.5+)</option>
-          <option value="battle-proven">Battle Proven</option>
-        </select>
-
-        <select
-          value={sortBy}
-          onChange={(e) => setSortBy(e.target.value)}
-          style={{
-            padding: 'var(--space-sm) var(--space-md)',
-            background: 'var(--dark-bg)',
-            border: '1px solid var(--dark-border)',
-            borderRadius: 'var(--radius-md)',
-            color: 'var(--text-primary)',
-            fontFamily: 'var(--font-primary)'
-          }}
-        >
-          <option value="price">Price: Low to High</option>
-          <option value="rating">Highest Rated</option>
-          <option value="battles">Most Battles</option>
-        </select>
-      </div>
-
-      {/* NFT Grid */}
-      <div className="nfts-grid" style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
-        gap: 'var(--space-lg)'
-      }}>
-        {sortedNFTs.map((nft) => (
-          <motion.div
-            key={nft.id}
-            className="nft-card card"
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            whileHover={{ scale: 1.02 }}
-          >
-            <div className="nft-image" style={{
-              width: '100%',
-              height: '200px',
-              background: `linear-gradient(135deg, #667eea 0%, #764ba2 100%)`,
-              borderRadius: 'var(--radius-md)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              marginBottom: 'var(--space-md)'
-            }}>
-              <img 
-                src={nft.image} 
-                alt={nft.name}
-                style={{
-                  width: '120px',
-                  height: '120px',
-                  borderRadius: 'var(--radius-full)',
-                  border: '3px solid white'
-                }}
-              />
-            </div>
-
-            <h4 style={{ color: 'var(--neon-cyan)', marginBottom: 'var(--space-xs)' }}>
-              {nft.name}
-            </h4>
-            <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: 'var(--space-md)' }}>
-              {nft.description}
+      {/* Listings Grid */}
+      <div className="max-w-7xl mx-auto">
+        {loading ? (
+          <div className="flex justify-center items-center h-64">
+            <div className="cosmic-spinner" />
+          </div>
+        ) : listings.length === 0 ? (
+          <div className="text-center py-16">
+            <ShoppingBagIcon className="w-20 h-20 mx-auto mb-4 opacity-30"
+                           style={{ color: '#ff00ff' }} />
+            <p className="text-xl" style={{ color: '#888' }}>
+              No listings available
             </p>
-
-            <div className="nft-stats" style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              marginBottom: 'var(--space-md)',
-              fontSize: '0.8rem'
-            }}>
-              <span style={{ color: 'var(--text-muted)' }}>
-                ⚔️ {nft.battles} battles
-              </span>
-              <span style={{ color: 'var(--text-muted)' }}>
-                🏆 {nft.wins} wins
-              </span>
-              <span style={{ color: 'var(--neon-yellow)' }}>
-                ⭐ {nft.rating}
-              </span>
-            </div>
-
-            <div className="nft-traits" style={{
-              display: 'flex',
-              flexWrap: 'wrap',
-              gap: 'var(--space-xs)',
-              marginBottom: 'var(--space-md)'
-            }}>
-              {nft.traits.slice(0, 2).map((trait, index) => (
-                <span 
-                  key={index}
-                  style={{
-                    background: 'rgba(0, 255, 255, 0.1)',
-                    border: '1px solid var(--neon-cyan)',
-                    padding: '2px 8px',
-                    borderRadius: 'var(--radius-full)',
-                    fontSize: '0.7rem',
-                    color: 'var(--neon-cyan)'
-                  }}
-                >
-                  {trait}
-                </span>
-              ))}
-            </div>
-
-            <div className="nft-price" style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              marginBottom: 'var(--space-md)'
-            }}>
-              <div>
-                <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>Price</div>
-                <div style={{ color: 'var(--neon-green)', fontWeight: 'bold', fontSize: '1.2rem' }}>
-                  {nft.price} {nft.currency}
-                </div>
-              </div>
-              <button
-                className="btn btn-primary"
-                onClick={() => handlePurchase(nft)}
-              >
-                <ShoppingCart size={16} style={{ marginRight: 'var(--space-xs)' }} />
-                Buy Now
-              </button>
-            </div>
-
-            <div style={{ color: 'var(--text-muted)', fontSize: '0.7rem', textAlign: 'center' }}>
-              Seller: {nft.seller}
-            </div>
-          </motion.div>
-        ))}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {listings.map((listing) => (
+              <MarketplaceCard
+                key={listing.id}
+                listing={listing}
+                onBuy={() => handleBuy(listing.id)}
+              />
+            ))}
+          </div>
+        )}
       </div>
-
-      {sortedNFTs.length === 0 && (
-        <div className="text-center" style={{ color: 'var(--text-muted)', padding: 'var(--space-xl)' }}>
-          <ShoppingCart size={64} style={{ opacity: 0.5, marginBottom: 'var(--space-md)' }} />
-          <p>No NFTs found matching your criteria.</p>
-        </div>
-      )}
     </div>
-  )
+  );
 }
 
-export default Marketplace
+function MarketplaceCard({ listing, onBuy }) {
+  const persona = listing.persona;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      whileHover={{ y: -8 }}
+      className="cosmic-card"
+      style={{
+        background: 'rgba(15, 0, 30, 0.98)',
+        backdropFilter: 'blur(25px)'
+      }}
+    >
+      {/* Persona Preview */}
+      <div className="relative h-48 rounded-t-xl overflow-hidden mb-4"
+           style={{ background: 'linear-gradient(135deg, #ff00ff, #a020f0)' }}>
+        {persona.avatar_url ? (
+          <img src={persona.avatar_url} alt={persona.name} className="w-full h-full object-cover" />
+        ) : (
+          <div className="flex items-center justify-center h-full">
+            <SparklesIcon className="w-20 h-20 text-white opacity-50" />
+          </div>
+        )}
+
+        {/* NFT Badge */}
+        <div className="absolute top-3 right-3 px-3 py-1 rounded-full text-xs font-bold"
+             style={{
+               background: 'linear-gradient(135deg, #ffaa00, #ff4444)',
+               color: '#000'
+             }}>
+          NFT #{persona.nft_token_id}
+        </div>
+      </div>
+
+      {/* Info */}
+      <div className="p-4">
+        <h3 className="cosmic-text text-xl font-bold mb-2">
+          {persona.name}
+        </h3>
+        
+        <div className="flex justify-between items-center mb-3">
+          <span className="text-sm" style={{ color: '#cbd5e1' }}>
+            Seller: @{listing.seller?.username || 'Anonymous'}
+          </span>
+          <span className="text-sm font-bold" style={{ color: '#00ffff' }}>
+            ELO: {persona.elo_rating}
+          </span>
+        </div>
+
+        {/* Stats */}
+        <div className="grid grid-cols-3 gap-2 mb-4 text-xs">
+          <div className="text-center p-2 rounded"
+               style={{ background: 'rgba(255, 0, 255, 0.1)' }}>
+            <div style={{ color: '#00ffff' }}>{persona.intelligence}</div>
+            <div style={{ color: '#888' }}>INT</div>
+          </div>
+          <div className="text-center p-2 rounded"
+               style={{ background: 'rgba(255, 0, 255, 0.1)' }}>
+            <div style={{ color: '#ff00ff' }}>{persona.creativity}</div>
+            <div style={{ color: '#888' }}>CRE</div>
+          </div>
+          <div className="text-center p-2 rounded"
+               style={{ background: 'rgba(255, 0, 255, 0.1)' }}>
+            <div style={{ color: '#00ff00' }}>{persona.persuasiveness}</div>
+            <div style={{ color: '#888' }}>PER</div>
+          </div>
+        </div>
+
+        {/* Price & Buy */}
+        <div className="flex items-center justify-between pt-4"
+             style={{ borderTop: '1px solid rgba(255, 0, 255, 0.3)' }}>
+          <div>
+            <div className="text-xs" style={{ color: '#888' }}>Price</div>
+            <div className="text-2xl font-bold cosmic-text">
+              {listing.price} STT
+            </div>
+          </div>
+          
+          <button
+            onClick={onBuy}
+            className="neon-btn"
+            style={{
+              background: 'linear-gradient(135deg, #00ff00, #00dd00)',
+              border: 'none',
+              color: '#000'
+            }}
+          >
+            <ShoppingBagIcon className="w-5 h-5 inline mr-2" />
+            Buy Now
+          </button>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
