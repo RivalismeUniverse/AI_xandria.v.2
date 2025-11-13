@@ -1,266 +1,227 @@
-import React, { useState, useRef, useEffect } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
-import { X, Send, MessageCircle, Wallet } from 'lucide-react'
-import { useWallet } from '../hooks/useWallet'
+import { useState, useEffect, useRef } from 'react';
+import Draggable from 'react-draggable';
+import { motion, AnimatePresence } from 'framer-motion';
+import { 
+  XMarkIcon, 
+  MinusIcon, 
+  PaperAirplaneIcon,
+  SparklesIcon 
+} from '@heroicons/react/24/solid';
+import { api } from '../services/api';
+import toast from 'react-hot-toast';
 
-const ChatWidget = ({ persona, isOpen, onClose }) => {
-  const [messages, setMessages] = useState([])
-  const [inputMessage, setInputMessage] = useState('')
-  const [isLoading, setIsLoading] = useState(false)
-  const [needsPayment, setNeedsPayment] = useState(true)
-  const messagesEndRef = useRef(null)
-  const { isConnected, connectWallet, balance } = useWallet()
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-  }
+export default function ChatWidget({ persona, onClose }) {
+  const [isMinimized, setIsMinimized] = useState(false);
+  const [session, setSession] = useState(null);
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState('');
+  const [sending, setSending] = useState(false);
+  const messagesEndRef = useRef(null);
 
   useEffect(() => {
-    scrollToBottom()
-  }, [messages])
-
-  const handleSendMessage = async () => {
-    if (!inputMessage.trim() || isLoading) return
-
-    if (!isConnected) {
-      await connectWallet()
-      return
+    if (persona) {
+      initChat();
     }
+  }, [persona]);
 
-    if (needsPayment) {
-      setNeedsPayment(false)
-      return
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  const initChat = async () => {
+    // For demo: assume chat is unlocked
+    // In production: check payment first
+    try {
+      const mockSession = {
+        id: 'demo-session',
+        persona_id: persona.id,
+        is_paid: true
+      };
+      setSession(mockSession);
+      
+      // Add welcome message
+      setMessages([{
+        role: 'assistant',
+        content: `Hello! I'm ${persona.name}. How can I help you today?`,
+        created_at: new Date()
+      }]);
+    } catch (error) {
+      toast.error('Failed to initialize chat');
     }
+  };
+
+  const sendMessage = async () => {
+    if (!input.trim() || sending) return;
 
     const userMessage = {
-      id: Date.now(),
-      text: inputMessage,
-      sender: 'user',
-      timestamp: new Date()
+      role: 'user',
+      content: input,
+      created_at: new Date()
+    };
+
+    setMessages(prev => [...prev, userMessage]);
+    setInput('');
+    setSending(true);
+
+    try {
+      const response = await api.sendChatMessage(session.id, input);
+      
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: response.assistant_message.content,
+        created_at: new Date(response.assistant_message.created_at)
+      }]);
+    } catch (error) {
+      toast.error('Failed to send message');
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: 'Sorry, I encountered an error. Please try again.',
+        created_at: new Date()
+      }]);
+    } finally {
+      setSending(false);
     }
+  };
 
-    setMessages(prev => [...prev, userMessage])
-    setInputMessage('')
-    setIsLoading(true)
+  const handleKeyPress = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  };
 
-    // Simulate AI response
-    setTimeout(() => {
-      const aiMessage = {
-        id: Date.now() + 1,
-        text: `This is ${persona.name}'s response to: "${inputMessage}". In a real implementation, this would come from Amazon Bedrock.`,
-        sender: 'persona',
-        timestamp: new Date()
-      }
-      setMessages(prev => [...prev, aiMessage])
-      setIsLoading(false)
-    }, 2000)
-  }
-
-  const handlePayment = async () => {
-    // In real implementation, process payment via blockchain
-    setNeedsPayment(false)
-  }
-
-  if (!isOpen) return null
+  if (!persona) return null;
 
   return (
-    <motion.div
-      className="chat-widget"
-      initial={{ opacity: 0, y: 100, scale: 0.9 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0, y: 100, scale: 0.9 }}
-      style={{
-        position: 'fixed',
-        bottom: 'var(--space-lg)',
-        right: 'var(--space-lg)',
-        width: '400px',
-        height: '600px',
-        background: 'var(--dark-card)',
-        border: '2px solid var(--neon-cyan)',
-        borderRadius: 'var(--radius-lg)',
-        boxShadow: 'var(--shadow-glow-cyan), var(--shadow-card)',
-        zIndex: 1000,
-        display: 'flex',
-        flexDirection: 'column',
-        backdropFilter: 'blur(10px)'
-      }}
-    >
-      {/* Header */}
-      <div className="chat-header" style={{
-        background: 'rgba(0, 255, 255, 0.1)',
-        padding: 'var(--space-md)',
-        borderBottom: '1px solid var(--neon-cyan)',
-        borderRadius: 'var(--radius-lg) var(--radius-lg) 0 0',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center'
-      }}>
-        <div className="chat-persona-info" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
-          <img 
-            src={persona.avatarUrl} 
-            alt={persona.name}
-            style={{
-              width: '40px',
-              height: '40px',
-              borderRadius: 'var(--radius-full)',
-              border: '2px solid var(--neon-pink)'
-            }}
-          />
-          <div>
-            <h4 style={{ color: 'var(--neon-cyan)', margin: 0 }}>{persona.name}</h4>
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', margin: 0 }}>
-              {persona.tagline}
-            </p>
-          </div>
-        </div>
-        <button 
-          onClick={onClose}
-          style={{
-            background: 'none',
-            border: 'none',
-            color: 'var(--neon-pink)',
-            cursor: 'pointer',
-            padding: 'var(--space-xs)'
-          }}
-        >
-          <X size={20} />
-        </button>
-      </div>
-
-      {/* Messages */}
-      <div className="chat-messages" style={{
-        flex: 1,
-        padding: 'var(--space-md)',
-        overflowY: 'auto',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 'var(--space-md)'
-      }}>
+    <Draggable handle=".drag-handle" bounds="parent">
+      <div
+        className="fixed z-50"
+        style={{
+          width: isMinimized ? '300px' : '400px',
+          bottom: '20px',
+          right: '20px'
+        }}
+      >
         <AnimatePresence>
-          {messages.map((message) => (
-            <motion.div
-              key={message.id}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              className={`message ${message.sender}-message`}
+          <motion.div
+            initial={{ scale: 0, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0, opacity: 0 }}
+            className="cosmic-card overflow-hidden"
+            style={{
+              background: 'rgba(15, 0, 30, 0.98)',
+              backdropFilter: 'blur(25px)',
+              maxHeight: isMinimized ? 'auto' : '600px',
+              display: 'flex',
+              flexDirection: 'column'
+            }}
+          >
+            {/* Header - Draggable */}
+            <div
+              className="drag-handle flex items-center justify-between p-4 cursor-move"
               style={{
-                alignSelf: message.sender === 'user' ? 'flex-end' : 'flex-start',
-                maxWidth: '80%',
-                padding: 'var(--space-md)',
-                borderRadius: 'var(--radius-lg)',
-                background: message.sender === 'user' 
-                  ? 'rgba(0, 255, 255, 0.2)' 
-                  : 'rgba(255, 20, 147, 0.2)',
-                border: `1px solid ${message.sender === 'user' ? 'var(--neon-cyan)' : 'var(--neon-pink)'}`,
-                borderBottomRightRadius: message.sender === 'user' ? 'var(--radius-xs)' : 'var(--radius-lg)',
-                borderBottomLeftRadius: message.sender === 'user' ? 'var(--radius-lg)' : 'var(--radius-xs)'
+                background: 'linear-gradient(135deg, #ff00ff, #a020f0)',
+                borderBottom: isMinimized ? 'none' : '2px solid rgba(255, 0, 255, 0.3)'
               }}
             >
-              <div style={{ color: 'var(--text-primary)' }}>{message.text}</div>
-              <div style={{ 
-                fontSize: '0.7rem', 
-                color: 'var(--text-muted)', 
-                marginTop: 'var(--space-xs)',
-                textAlign: message.sender === 'user' ? 'right' : 'left'
-              }}>
-                {message.timestamp.toLocaleTimeString()}
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full flex items-center justify-center"
+                     style={{ background: 'rgba(0, 0, 0, 0.3)' }}>
+                  <SparklesIcon className="w-6 h-6 text-white" />
+                </div>
+                <div>
+                  <h4 className="font-bold text-white">{persona.name}</h4>
+                  <p className="text-xs text-white opacity-75">
+                    {sending ? 'Typing...' : 'Online'}
+                  </p>
+                </div>
               </div>
-            </motion.div>
-          ))}
-        </AnimatePresence>
 
-        {isLoading && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="message persona-message"
-            style={{
-              alignSelf: 'flex-start',
-              maxWidth: '80%',
-              padding: 'var(--space-md)',
-              background: 'rgba(255, 20, 147, 0.2)',
-              border: '1px solid var(--neon-pink)',
-              borderRadius: 'var(--radius-lg)',
-              borderBottomLeftRadius: 'var(--radius-xs)'
-            }}
-          >
-            <div className="typing-indicator">
-              <span></span>
-              <span></span>
-              <span></span>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setIsMinimized(!isMinimized)}
+                  className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-white hover:bg-opacity-20 transition-all"
+                >
+                  <MinusIcon className="w-5 h-5 text-white" />
+                </button>
+                <button
+                  onClick={onClose}
+                  className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-white hover:bg-opacity-20 transition-all"
+                >
+                  <XMarkIcon className="w-5 h-5 text-white" />
+                </button>
+              </div>
             </div>
+
+            {/* Chat Body */}
+            {!isMinimized && (
+              <>
+                <div
+                  className="flex-1 overflow-y-auto p-4 space-y-3"
+                  style={{
+                    minHeight: '300px',
+                    maxHeight: '400px'
+                  }}
+                >
+                  {messages.map((msg, idx) => (
+                    <motion.div
+                      key={idx}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                    >
+                      <div
+                        className="max-w-[80%] p-3 rounded-lg"
+                        style={{
+                          background: msg.role === 'user'
+                            ? 'linear-gradient(135deg, #ff00ff, #a020f0)'
+                            : 'rgba(255, 255, 255, 0.1)',
+                          color: '#fff'
+                        }}
+                      >
+                        <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                      </div>
+                    </motion.div>
+                  ))}
+                  <div ref={messagesEndRef} />
+                </div>
+
+                {/* Input Area */}
+                <div className="p-4" style={{ borderTop: '1px solid rgba(255, 0, 255, 0.3)' }}>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={input}
+                      onChange={(e) => setInput(e.target.value)}
+                      onKeyPress={handleKeyPress}
+                      placeholder="Type your message..."
+                      disabled={sending}
+                      className="cosmic-input flex-1"
+                      style={{ marginBottom: 0 }}
+                    />
+                    <button
+                      onClick={sendMessage}
+                      disabled={sending || !input.trim()}
+                      className="neon-btn px-4"
+                      style={{
+                        background: 'linear-gradient(135deg, #ff00ff, #a020f0)',
+                        border: 'none',
+                        minWidth: 'auto'
+                      }}
+                    >
+                      <PaperAirplaneIcon className="w-5 h-5 text-white" />
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
           </motion.div>
-        )}
-        
-        <div ref={messagesEndRef} />
+        </AnimatePresence>
       </div>
-
-      {/* Payment Gate */}
-      {needsPayment && (
-        <div className="payment-gate" style={{
-          padding: 'var(--space-md)',
-          background: 'rgba(255, 215, 0, 0.1)',
-          border: '1px solid var(--neon-yellow)',
-          borderRadius: 'var(--radius-md)',
-          margin: 'var(--space-md)',
-          textAlign: 'center'
-        }}>
-          <Wallet size={24} style={{ color: 'var(--neon-yellow)', marginBottom: 'var(--space-sm)' }} />
-          <h4 style={{ color: 'var(--neon-yellow)', marginBottom: 'var(--space-xs)' }}>
-            Unlock Chat Access
-          </h4>
-          <p style={{ color: 'var(--text-secondary)', marginBottom: 'var(--space-md)', fontSize: '0.9rem' }}>
-            Pay {persona.price || '5 STT'} to start chatting with {persona.name}
-          </p>
-          <button 
-            className="btn btn-primary"
-            onClick={handlePayment}
-            disabled={!isConnected}
-          >
-            {isConnected ? `Pay ${persona.price || '5 STT'}` : 'Connect Wallet First'}
-          </button>
-        </div>
-      )}
-
-      {/* Input */}
-      {!needsPayment && (
-        <div className="chat-input" style={{
-          padding: 'var(--space-md)',
-          borderTop: '1px solid var(--dark-border)',
-          background: 'rgba(0, 0, 0, 0.5)',
-          borderRadius: '0 0 var(--radius-lg) var(--radius-lg)',
-          display: 'flex',
-          gap: 'var(--space-sm)'
-        }}>
-          <input
-            type="text"
-            value={inputMessage}
-            onChange={(e) => setInputMessage(e.target.value)}
-            onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-            placeholder="Type your message..."
-            disabled={isLoading}
-            style={{
-              flex: 1,
-              padding: 'var(--space-sm) var(--space-md)',
-              background: 'rgba(255, 255, 255, 0.1)',
-              border: '1px solid var(--dark-border)',
-              borderRadius: 'var(--radius-md)',
-              color: 'var(--text-primary)',
-              fontFamily: 'var(--font-primary)'
-            }}
-          />
-          <button 
-            className="btn btn-primary"
-            onClick={handleSendMessage}
-            disabled={!inputMessage.trim() || isLoading}
-            style={{ padding: 'var(--space-sm) var(--space-md)' }}
-          >
-            <Send size={16} />
-          </button>
-        </div>
-      )}
-    </motion.div>
-  )
+    </Draggable>
+  );
 }
-
-export default ChatWidget
