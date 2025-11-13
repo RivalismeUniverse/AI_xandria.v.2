@@ -62,3 +62,4 @@ const MarketplaceListing = (sequelize, DataTypes) => {
     ]
   });
 };
+module.exports = { MarketplaceListing };
