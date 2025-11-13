@@ -1,164 +1,146 @@
-import React, { createContext, useContext, useState, useEffect } from 'react'
-import { ethers } from 'ethers'
-import { blockchainService } from '../services/blockchain'
-
-const WalletContext = createContext()
-
-export const WalletProvider = ({ children }) => {
-  const [isConnected, setIsConnected] = useState(false)
-  const [walletAddress, setWalletAddress] = useState('')
-  const [balance, setBalance] = useState('0')
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
-
-  // Check if wallet was previously connected
-  useEffect(() => {
-    checkPreviousConnection()
-  }, [])
-
-  const checkPreviousConnection = async () => {
-    if (typeof window.ethereum !== 'undefined') {
-      try {
-        const accounts = await window.ethereum.request({ method: 'eth_accounts' })
-        if (accounts.length > 0) {
-          await handleConnection(accounts[0])
-        }
-      } catch (error) {
-        console.error('Error checking previous connection:', error)
-      }
-    }
-  }
-
-  const connectWallet = async () => {
-    setLoading(true)
-    setError('')
-    
-    try {
-      if (typeof window.ethereum === 'undefined') {
-        throw new Error('Please install MetaMask!')
-      }
-
-      // Request account access
-      const accounts = await window.ethereum.request({ 
-        method: 'eth_requestAccounts' 
-      })
-
-      if (accounts.length === 0) {
-        throw new Error('No accounts found')
-      }
-
-      await handleConnection(accounts[0])
-      
-    } catch (error) {
-      console.error('Wallet connection failed:', error)
-      setError(error.message)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const handleConnection = async (address) => {
-    setWalletAddress(address)
-    setIsConnected(true)
-    
-    // Get balance
-    const provider = new ethers.BrowserProvider(window.ethereum)
-    const balance = await provider.getBalance(address)
-    setBalance(ethers.formatEther(balance))
-
-    // Initialize blockchain service
-    await blockchainService.initialize()
-
-    // Setup event listeners
-    setupEventListeners()
-  }
-
-  const disconnectWallet = () => {
-    setIsConnected(false)
-    setWalletAddress('')
-    setBalance('0')
-    setError('')
-    
-    // Clear any stored session data
-    localStorage.removeItem('walletConnected')
-    localStorage.removeItem('walletAddress')
-  }
-
-  const setupEventListeners = () => {
-    if (window.ethereum) {
-      // Account changed
-      window.ethereum.on('accountsChanged', (accounts) => {
-        if (accounts.length === 0) {
-          disconnectWallet()
-        } else {
-          handleConnection(accounts[0])
-        }
-      })
-
-      // Chain changed
-      window.ethereum.on('chainChanged', () => {
-        window.location.reload()
-      })
-    }
-  }
-
-  const switchToSomniaNetwork = async () => {
-    try {
-      await window.ethereum.request({
-        method: 'wallet_switchEthereumChain',
-        params: [{ chainId: '0xC488' }], // 50312 in hex
-      })
-    } catch (switchError) {
-      // This error code indicates that the chain has not been added to MetaMask
-      if (switchError.code === 4902) {
-        try {
-          await window.ethereum.request({
-            method: 'wallet_addEthereumChain',
-            params: [
-              {
-                chainId: '0xC488',
-                chainName: 'Somnia Testnet',
-                rpcUrls: ['https://rpc.somnia.network'],
-                blockExplorerUrls: ['https://shannon-explorer.somnia.network/'],
-                nativeCurrency: {
-                  name: 'STT',
-                  symbol: 'STT',
-                  decimals: 18
-                },
-              },
-            ],
-          })
-        } catch (addError) {
-          throw new Error('Failed to add Somnia network to MetaMask')
-        }
-      } else {
-        throw new Error('Failed to switch to Somnia network')
-      }
-    }
-  }
-
-  const value = {
-    isConnected,
-    walletAddress,
-    balance,
-    loading,
-    error,
-    connectWallet,
-    disconnectWallet,
-    switchToSomniaNetwork
-  }
-
-  return (
-    <WalletContext.Provider value={value}>
-      {children}
-    </WalletContext.Provider>
-  )
-}
+import { useState, useEffect } from 'react';
+import { ethers } from 'ethers';
+import { api } from '../services/api';
+import toast from 'react-hot-toast';
 
 export const useWallet = () => {
-  const context = useContext(WalletContext)
-  if (!context) {
-    throw new Error('useWallet must be used within a WalletProvider')
-  }
-  return context
-}
+  const [address, setAddress] = useState(null);
+  const [provider, setProvider] = useState(null);
+  const [signer, setSigner] = useState(null);
+  const [isConnected, setIsConnected] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [balance, setBalance] = useState('0');
+
+  useEffect(() => {
+    checkConnection();
+    
+    if (window.ethereum) {
+      window.ethereum.on('accountsChanged', handleAccountsChanged);
+      window.ethereum.on('chainChanged', () => window.location.reload());
+    }
+
+    return () => {
+      if (window.ethereum) {
+        window.ethereum.removeListener('accountsChanged', handleAccountsChanged);
+      }
+    };
+  }, []);
+
+  const checkConnection = async () => {
+    const token = localStorage.getItem('auth_token');
+    const savedAddress = localStorage.getItem('wallet_address');
+    
+    if (token && savedAddress) {
+      setAddress(savedAddress);
+      setIsConnected(true);
+      await initProvider(savedAddress);
+    }
+  };
+
+  const initProvider = async (walletAddress) => {
+    if (window.ethereum) {
+      const ethersProvider = new ethers.BrowserProvider(window.ethereum);
+      const ethersSigner = await ethersProvider.getSigner();
+      
+      setProvider(ethersProvider);
+      setSigner(ethersSigner);
+      
+      // Get balance
+      const bal = await ethersProvider.getBalance(walletAddress);
+      setBalance(ethers.formatEther(bal));
+    }
+  };
+
+  const connectWallet = async () => {
+    if (!window.ethereum) {
+      toast.error('Please install MetaMask!');
+      return;
+    }
+
+    setIsConnecting(true);
+    
+    try {
+      // Request accounts
+      const accounts = await window.ethereum.request({ 
+        method: 'eth_requestAccounts' 
+      });
+      
+      const walletAddress = accounts[0];
+      
+      // Sign message for authentication
+      const ethersProvider = new ethers.BrowserProvider(window.ethereum);
+      const ethersSigner = await ethersProvider.getSigner();
+      
+      const message = `Sign this message to authenticate with AI_XANDRIA: ${Date.now()}`;
+      const signature = await ethersSigner.signMessage(message);
+
+      // Authenticate with backend
+      const response = await api.connectWallet(walletAddress, signature, message);
+      
+      // Save auth
+      localStorage.setItem('auth_token', response.token);
+      localStorage.setItem('wallet_address', walletAddress);
+      
+      // Update state
+      setAddress(walletAddress);
+      setProvider(ethersProvider);
+      setSigner(ethersSigner);
+      setIsConnected(true);
+      
+      // Get balance
+      const bal = await ethersProvider.getBalance(walletAddress);
+      setBalance(ethers.formatEther(bal));
+      
+      toast.success('Wallet connected!');
+      
+      return response.user;
+    } catch (error) {
+      console.error('Connection error:', error);
+      toast.error('Failed to connect wallet');
+      throw error;
+    } finally {
+      setIsConnecting(false);
+    }
+  };
+
+  const disconnectWallet = () => {
+    localStorage.removeItem('auth_token');
+    localStorage.removeItem('wallet_address');
+    
+    setAddress(null);
+    setProvider(null);
+    setSigner(null);
+    setIsConnected(false);
+    setBalance('0');
+    
+    toast.success('Wallet disconnected');
+  };
+
+  const handleAccountsChanged = (accounts) => {
+    if (accounts.length === 0) {
+      disconnectWallet();
+    } else if (accounts[0] !== address) {
+      disconnectWallet();
+      toast.info('Account changed. Please reconnect.');
+    }
+  };
+
+  const signMessage = async (message) => {
+    if (!signer) {
+      throw new Error('Wallet not connected');
+    }
+    return await signer.signMessage(message);
+  };
+
+  return {
+    address,
+    provider,
+    signer,
+    isConnected,
+    isConnecting,
+    balance,
+    connectWallet,
+    disconnectWallet,
+    signMessage
+  };
+};
