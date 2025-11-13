@@ -1,73 +1,15 @@
 const express = require('express');
 const router = express.Router();
 const { Persona, User } = require('../models');
+const { Op } = require('sequelize');
 const auth = require('../middleware/auth');
 const logger = require('../utils/logger');
-const { Op } = require('sequelize'); // <-- tambah Op
-
-// safe wrapper: memastikan kita selalu passing function ke Express
-const safeHandler = (fn) => {
-  if (typeof fn !== 'function') {
-    return async (req, res) => {
-      // log for debugging (non-blocking)
-      logger && logger.warn && logger.warn('safeHandler: handler missing or not a function', { handler: fn });
-      return res.status(200).json({ note: 'temporary stub - handler missing' });
-    };
-  }
-  return async (req, res, next) => {
-    try {
-      await fn(req, res, next);
-    } catch (err) {
-      next(err);
-    }
-  };
-};
-
-// Ensure auth is a function (middleware). If not, fallback to a no-op middleware that attaches dummy user (for testing)
-const safeAuth = (typeof auth === 'function') ? auth : (req, res, next) => {
-  // if auth is object or missing, don't block startup — attach dummy user only in dev
-  if (!req.user) req.user = { id: null };
-  next();
-};
-
-/**
- * GET /api/personas/leaderboard
- * Get top personas by ELO rating
- * (moved above parameterized routes to avoid collision)
- */
-router.get('/leaderboard', safeHandler(async (req, res, next) => {
-  try {
-    const { limit = 10 } = req.query;
-
-    const leaderboard = await Persona.findAll({
-      limit: parseInt(limit),
-      order: [['elo_rating', 'DESC']],
-      include: [{
-        model: User,
-        as: 'creator',
-        attributes: ['username', 'wallet_address']
-      }],
-      attributes: [
-        'id', 
-        'name', 
-        'elo_rating', 
-        'total_battles', 
-        'total_wins',
-        'avatar_url'
-      ]
-    });
-
-    res.json(leaderboard);
-  } catch (error) {
-    next(error);
-  }
-}));
 
 /**
  * GET /api/personas
  * Get all personas with pagination
  */
-router.get('/', safeHandler(async (req, res, next) => {
+router.get('/', async (req, res, next) => {
   try {
     const { 
       page = 1, 
@@ -104,51 +46,13 @@ router.get('/', safeHandler(async (req, res, next) => {
   } catch (error) {
     next(error);
   }
-}));
-
-/**
- * GET /api/personas/:id/stats
- * Get persona statistics
- * (put before :id to be safe)
- */
-router.get('/:id/stats', safeHandler(async (req, res, next) => {
-  try {
-    const persona = await Persona.findByPk(req.params.id);
-
-    if (!persona) {
-      return res.status(404).json({ error: 'Persona not found' });
-    }
-
-    const stats = {
-      battles: {
-        total: persona.total_battles,
-        wins: persona.total_wins,
-        winRate: persona.total_battles > 0 
-          ? (persona.total_wins / persona.total_battles * 100).toFixed(1)
-          : 0
-      },
-      rating: persona.elo_rating,
-      chats: persona.total_chats,
-      revenue: persona.revenue_earned,
-      traits: {
-        intelligence: persona.intelligence,
-        creativity: persona.creativity,
-        persuasiveness: persona.persuasiveness
-      }
-    };
-
-    res.json(stats);
-  } catch (error) {
-    next(error);
-  }
-}));
+});
 
 /**
  * GET /api/personas/:id
  * Get single persona details
- * (parameter route after specific ones)
  */
-router.get('/:id', safeHandler(async (req, res, next) => {
+router.get('/:id', async (req, res, next) => {
   try {
     const persona = await Persona.findByPk(req.params.id, {
       include: [{
@@ -166,13 +70,13 @@ router.get('/:id', safeHandler(async (req, res, next) => {
   } catch (error) {
     next(error);
   }
-}));
+});
 
 /**
  * POST /api/personas
  * Create new persona (requires auth)
  */
-router.post('/', safeAuth, safeHandler(async (req, res, next) => {
+router.post('/', auth, async (req, res, next) => {
   try {
     const {
       name,
@@ -225,13 +129,13 @@ router.post('/', safeAuth, safeHandler(async (req, res, next) => {
   } catch (error) {
     next(error);
   }
-}));
+});
 
 /**
  * PUT /api/personas/:id
  * Update persona (owner only)
  */
-router.put('/:id', safeAuth, safeHandler(async (req, res, next) => {
+router.put('/:id', auth, async (req, res, next) => {
   try {
     const persona = await Persona.findByPk(req.params.id);
 
@@ -278,13 +182,13 @@ router.put('/:id', safeAuth, safeHandler(async (req, res, next) => {
   } catch (error) {
     next(error);
   }
-}));
+});
 
 /**
  * DELETE /api/personas/:id
  * Delete persona (owner only)
  */
-router.delete('/:id', safeAuth, safeHandler(async (req, res, next) => {
+router.delete('/:id', auth, async (req, res, next) => {
   try {
     const persona = await Persona.findByPk(req.params.id);
 
@@ -317,6 +221,74 @@ router.delete('/:id', safeAuth, safeHandler(async (req, res, next) => {
   } catch (error) {
     next(error);
   }
-}));
+});
+
+/**
+ * GET /api/personas/:id/stats
+ * Get persona statistics
+ */
+router.get('/:id/stats', async (req, res, next) => {
+  try {
+    const persona = await Persona.findByPk(req.params.id);
+
+    if (!persona) {
+      return res.status(404).json({ error: 'Persona not found' });
+    }
+
+    const stats = {
+      battles: {
+        total: persona.total_battles,
+        wins: persona.total_wins,
+        winRate: persona.total_battles > 0 
+          ? (persona.total_wins / persona.total_battles * 100).toFixed(1)
+          : 0
+      },
+      rating: persona.elo_rating,
+      chats: persona.total_chats,
+      revenue: persona.revenue_earned,
+      traits: {
+        intelligence: persona.intelligence,
+        creativity: persona.creativity,
+        persuasiveness: persona.persuasiveness
+      }
+    };
+
+    res.json(stats);
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * GET /api/personas/leaderboard
+ * Get top personas by ELO rating
+ */
+router.get('/leaderboard', async (req, res, next) => {
+  try {
+    const { limit = 10 } = req.query;
+
+    const leaderboard = await Persona.findAll({
+      limit: parseInt(limit),
+      order: [['elo_rating', 'DESC']],
+      include: [{
+        model: User,
+        as: 'creator',
+        attributes: ['username', 'wallet_address']
+      }],
+      attributes: [
+        'id', 
+        'name', 
+        'elo_rating', 
+        'total_battles', 
+        'total_wins',
+        'avatar_url'
+      ]
+    });
+
+    res.json(leaderboard);
+  } catch (error) {
+    next(error);
+  }
+});
 
 module.exports = router;
