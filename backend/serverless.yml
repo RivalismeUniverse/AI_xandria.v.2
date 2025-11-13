@@ -5,156 +5,70 @@ frameworkVersion: '3'
 provider:
   name: aws
   runtime: nodejs18.x
-  region: ${opt:region, 'us-east-1'}
+  region: us-east-1
   stage: ${opt:stage, 'dev'}
   timeout: 30
-  memorySize: 1024
+  memorySize: 512
+  
   environment:
     NODE_ENV: ${self:provider.stage}
-    AWS_REGION: ${self:provider.region}
+    BEDROCK_REGION: us-east-1
     RDS_HOST: ${env:RDS_HOST}
+    RDS_PORT: ${env:RDS_PORT, '5432'}
     RDS_DATABASE: ${env:RDS_DATABASE}
     RDS_USERNAME: ${env:RDS_USERNAME}
     RDS_PASSWORD: ${env:RDS_PASSWORD}
+    S3_BUCKET: ${env:S3_BUCKET}
     JWT_SECRET: ${env:JWT_SECRET}
-    PINATA_API_KEY: ${env:PINATA_API_KEY}
-    PINATA_SECRET_KEY: ${env:PINATA_SECRET_KEY}
-    SOMNIA_RPC_URL: ${env:SOMNIA_RPC_URL}
+    BLOCKCHAIN_RPC: ${env:BLOCKCHAIN_RPC}
     CONTRACT_ADDRESS: ${env:CONTRACT_ADDRESS}
-
-  iamRoleStatements:
-    - Effect: Allow
-      Action:
-        - bedrock:InvokeModel
-        - bedrock:ListFoundationModels
-      Resource: "*"
-    
-    - Effect: Allow
-      Action:
-        - s3:PutObject
-        - s3:GetObject
-        - s3:DeleteObject
-        - s3:ListBucket
-      Resource:
-        - "arn:aws:s3:::ai-xandria-${self:provider.stage}-personas/*"
-        - "arn:aws:s3:::ai-xandria-${self:provider.stage}-nfts/*"
-        - "arn:aws:s3:::ai-xandria-${self:provider.stage}-battles/*"
-    
-    - Effect: Allow
-      Action:
-        - rds-db:connect
-      Resource: "arn:aws:rds:${self:provider.region}:*:db:${env:RDS_DATABASE}"
-    
-    - Effect: Allow
-      Action:
-        - logs:CreateLogGroup
-        - logs:CreateLogStream
-        - logs:PutLogEvents
-      Resource: "*"
-
-plugins:
-  - serverless-offline
+  
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - bedrock:InvokeModel
+            - bedrock:InvokeModelWithResponseStream
+          Resource: "*"
+        - Effect: Allow
+          Action:
+            - s3:GetObject
+            - s3:PutObject
+            - s3:DeleteObject
+          Resource: "arn:aws:s3:::${env:S3_BUCKET}/*"
+        - Effect: Allow
+          Action:
+            - logs:CreateLogGroup
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+          Resource: "*"
+        - Effect: Allow
+          Action:
+            - rds:DescribeDBInstances
+          Resource: "*"
 
 functions:
   api:
     handler: src/lambda.handler
     events:
-      - httpApi: 
-          method: ANY
+      - httpApi:
           path: /{proxy+}
-      - httpApi: 
           method: ANY
+      - httpApi:
           path: /
+          method: ANY
+    vpc:
+      securityGroupIds:
+        - ${env:VPC_SECURITY_GROUP_ID}
+      subnetIds:
+        - ${env:VPC_SUBNET_ID_1}
+        - ${env:VPC_SUBNET_ID_2}
 
-  personaGenerate:
-    handler: src/functions/persona/generate.handler
-    events:
-      - httpApi:
-          path: /api/personas/generate
-          method: post
-    environment:
-      BEDROCK_MODEL: anthropic.claude-3-5-sonnet-20241022-v2:0
-
-  battleCreate:
-    handler: src/functions/battle/create.handler
-    events:
-      - httpApi:
-          path: /api/battles
-          method: post
-
-  chatSend:
-    handler: src/functions/chat/send.handler
-    events:
-      - httpApi:
-          path: /api/chat/{personaId}/send
-          method: post
-
-  nftMint:
-    handler: src/functions/nft/mint.handler
-    events:
-      - httpApi:
-          path: /api/nft/mint
-          method: post
-
-  imageGenerate:
-    handler: src/functions/image/generate.handler
-    events:
-      - httpApi:
-          path: /api/images/generate
-          method: post
-    environment:
-      BEDROCK_IMAGE_MODEL: amazon.titan-image-generator-v1
-
-resources:
-  Resources:
-    PersonasBucket:
-      Type: AWS::S3::Bucket
-      Properties:
-        BucketName: ai-xandria-${self:provider.stage}-personas
-        CorsConfiguration:
-          CorsRules:
-            - AllowedOrigins:
-                - "*"
-              AllowedMethods:
-                - GET
-                - PUT
-                - POST
-                - DELETE
-              AllowedHeaders:
-                - "*"
-
-    NFTsBucket:
-      Type: AWS::S3::Bucket
-      Properties:
-        BucketName: ai-xandria-${self:provider.stage}-nfts
-        CorsConfiguration:
-          CorsRules:
-            - AllowedOrigins:
-                - "*"
-              AllowedMethods:
-                - GET
-                - PUT
-                - POST
-              AllowedHeaders:
-                - "*"
-
-    BattlesBucket:
-      Type: AWS::S3::Bucket
-      Properties:
-        BucketName: ai-xandria-${self:provider.stage}-battles
-        CorsConfiguration:
-          CorsRules:
-            - AllowedOrigins:
-                - "*"
-              AllowedMethods:
-                - GET
-                - PUT
-                - POST
-              AllowedHeaders:
-                - "*"
+plugins:
+  - serverless-offline
 
 custom:
   serverless-offline:
     httpPort: 3000
-    lambdaPort: 3002
     noPrependStageInUrl: true
