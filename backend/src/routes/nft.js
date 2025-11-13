@@ -1,276 +1,354 @@
-// backend/src/routes/nft.js
-import express from 'express';
-import { auth } from '../middleware/auth.js';
-import { rateLimit } from '../middleware/rateLimit.js';
-import NFT from '../models/NFT.js';
-import Persona from '../models/Persona.js';
-import BlockchainService from '../services/blockchainService.js';
-import S3Service from '../services/s3-service.js';
-
+const express = require('express');
 const router = express.Router();
+const { Persona, MarketplaceListing, User } = require('../models');
+const s3Service = require('../services/s3-service');
+const blockchainService = require('../services/blockchainService');
+const auth = require('../middleware/auth');
+const logger = require('../utils/logger');
+const { ValidationError, ForbiddenError } = require('../utils/errorHandler');
 
-// Mint persona as NFT
-router.post('/mint', auth, rateLimit, async (req, res) => {
+/**
+ * POST /api/nft/mint
+ * Mint persona as NFT
+ */
+router.post('/mint', auth, async (req, res, next) => {
   try {
-    const { personaId, price = '0.1' } = req.body;
+    const { persona_id } = req.body;
 
-    if (!personaId) {
-      return res.status(400).json({
-        success: false,
-        error: 'personaId is required'
-      });
+    if (!persona_id) {
+      throw new ValidationError('persona_id required');
     }
 
-    const persona = await Persona.findById(personaId);
-    
+    const persona = await Persona.findByPk(persona_id);
+
     if (!persona) {
-      return res.status(404).json({
-        success: false,
-        error: 'Persona not found'
-      });
+      return res.status(404).json({ error: 'Persona not found' });
     }
 
-    if (persona.creatorWallet !== req.walletAddress) {
-      return res.status(403).json({
-        success: false,
-        error: 'Not authorized to mint this persona'
-      });
+    // Verify ownership
+    if (persona.creator_id !== req.user.id) {
+      throw new ForbiddenError('You can only mint your own personas');
     }
 
     // Check if already minted
-    if (persona.nftTokenId) {
-      return res.status(400).json({
-        success: false,
-        error: 'Persona already minted as NFT'
-      });
+    if (persona.is_minted) {
+      return res.status(400).json({ error: 'Persona already minted' });
     }
 
-    // Prepare NFT metadata
+    // Prepare metadata
     const metadata = {
       name: persona.name,
       description: persona.description,
-      image: persona.avatarUrl,
+      image: persona.avatar_url,
       attributes: [
-        {
-          trait_type: 'Intelligence',
-          value: persona.traits.intelligence
-        },
-        {
-          trait_type: 'Creativity', 
-          value: persona.traits.creativity
-        },
-        {
-          trait_type: 'Persuasiveness',
-          value: persona.traits.persuasiveness
-        },
-        {
-          trait_type: 'Category',
-          value: persona.category
+        { trait_type: 'Intelligence', value: persona.intelligence },
+        { trait_type: 'Creativity', value: persona.creativity },
+        { trait_type: 'Persuasiveness', value: persona.persuasiveness },
+        { trait_type: 'ELO Rating', value: persona.elo_rating },
+        { trait_type: 'Total Battles', value: persona.total_battles },
+        { trait_type: 'Total Wins', value: persona.total_wins },
+        { trait_type: 'Win Rate', value: persona.total_battles > 0 
+          ? ((persona.total_wins / persona.total_battles) * 100).toFixed(1) 
+          : 0 
         }
       ],
-      external_url: `https://aixandria.com/personas/${persona.id}`,
-      background_color: '000000'
+      properties: {
+        personality: persona.personality,
+        expertise: persona.expertise,
+        created_at: persona.created_at
+      }
     };
 
     // Upload metadata to S3
-    const metadataURI = await S3Service.uploadNFTMetadata(metadata, persona.id);
+    const metadataURI = await s3Service.uploadMetadata(persona.id, metadata);
 
     // Mint NFT on blockchain
-    const mintResult = await BlockchainService.mintPersonaNFT(
+    const { tokenId, txHash, contractAddress } = await blockchainService.mintPersonaNFT(
       req.walletAddress,
-      persona.name,
-      metadataURI
+      persona.id,
+      metadataURI,
+      metadata
     );
 
-    // Update persona with NFT info
-    await Persona.update(personaId, {
-      nftTokenId: mintResult.tokenId,
-      nftMetadataURI: metadataURI,
-      isNft: true,
-      nftPrice: price
+    // Update persona
+    await persona.update({
+      is_minted: true,
+      nft_token_id: tokenId,
+      nft_contract_address: contractAddress
     });
 
-    // Create NFT record
-    const nft = await NFT.create({
-      tokenId: mintResult.tokenId,
+    logger.info('Persona minted as NFT', {
       personaId: persona.id,
-      ownerWallet: req.walletAddress,
-      creatorWallet: persona.creatorWallet,
-      metadataURI,
-      price,
-      transactionHash: mintResult.transactionHash
+      tokenId,
+      txHash,
+      owner: req.walletAddress
     });
 
     res.status(201).json({
-      success: true,
-      data: {
-        nft,
-        transaction: mintResult
-      },
-      message: 'Persona minted as NFT successfully'
+      message: 'Persona minted successfully',
+      token_id: tokenId,
+      tx_hash: txHash,
+      contract_address: contractAddress,
+      metadata_uri: metadataURI
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: 'Failed to mint NFT',
-      message: error.message
-    });
+    next(error);
   }
 });
 
-// List NFT on marketplace
-router.post('/:tokenId/list', auth, rateLimit, async (req, res) => {
+/**
+ * GET /api/nft/marketplace
+ * Get marketplace listings
+ */
+router.get('/marketplace', async (req, res, next) => {
   try {
-    const { tokenId } = req.params;
-    const { price } = req.body;
+    const { 
+      page = 1, 
+      limit = 20,
+      sort = 'created_at',
+      order = 'DESC',
+      min_price,
+      max_price
+    } = req.query;
 
-    if (!price) {
-      return res.status(400).json({
-        success: false,
-        error: 'Price is required'
+    const offset = (page - 1) * limit;
+    const where = { is_active: true };
+
+    // Price filtering
+    if (min_price) {
+      where.price = { ...where.price, [Op.gte]: min_price };
+    }
+    if (max_price) {
+      where.price = { ...where.price, [Op.lte]: max_price };
+    }
+
+    const listings = await MarketplaceListing.findAndCountAll({
+      where,
+      limit: parseInt(limit),
+      offset,
+      order: [[sort, order]],
+      include: [
+        {
+          model: Persona,
+          as: 'persona',
+          include: [{
+            model: User,
+            as: 'creator',
+            attributes: ['id', 'username', 'wallet_address']
+          }]
+        },
+        {
+          model: User,
+          as: 'seller',
+          attributes: ['id', 'username', 'wallet_address']
+        }
+      ]
+    });
+
+    res.json({
+      listings: listings.rows,
+      total: listings.count,
+      page: parseInt(page),
+      totalPages: Math.ceil(listings.count / limit)
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /api/nft/marketplace
+ * Create marketplace listing
+ */
+router.post('/marketplace', auth, async (req, res, next) => {
+  try {
+    const { persona_id, price } = req.body;
+
+    if (!persona_id || !price) {
+      throw new ValidationError('persona_id and price required');
+    }
+
+    if (price <= 0) {
+      throw new ValidationError('Price must be greater than 0');
+    }
+
+    const persona = await Persona.findByPk(persona_id);
+
+    if (!persona) {
+      return res.status(404).json({ error: 'Persona not found' });
+    }
+
+    if (!persona.is_minted) {
+      return res.status(400).json({ 
+        error: 'Persona must be minted as NFT first' 
       });
     }
 
-    const nft = await NFT.findByTokenId(tokenId);
-    
-    if (!nft) {
-      return res.status(404).json({
-        success: false,
-        error: 'NFT not found'
-      });
-    }
-
-    if (nft.ownerWallet !== req.walletAddress) {
-      return res.status(403).json({
-        success: false,
-        error: 'Not authorized to list this NFT'
-      });
-    }
-
-    // List on blockchain marketplace
-    const listingResult = await BlockchainService.listNFTOnMarketplace(
-      tokenId,
-      price,
+    // Verify ownership via blockchain
+    const isOwner = await blockchainService.verifyNFTOwnership(
+      persona.nft_token_id,
       req.walletAddress
     );
 
-    // Update NFT listing status
-    await NFT.updateListing(tokenId, {
-      isListed: true,
-      listingPrice: price,
-      listingId: listingResult.listingId
+    if (!isOwner) {
+      throw new ForbiddenError('You do not own this NFT');
+    }
+
+    // Check for existing active listing
+    const existingListing = await MarketplaceListing.findOne({
+      where: {
+        persona_id,
+        is_active: true
+      }
     });
 
-    res.json({
-      success: true,
-      data: listingResult,
-      message: 'NFT listed on marketplace successfully'
+    if (existingListing) {
+      return res.status(400).json({ 
+        error: 'Persona already listed' 
+      });
+    }
+
+    // Create listing
+    const listing = await MarketplaceListing.create({
+      persona_id,
+      seller_id: req.user.id,
+      price,
+      currency: 'STT'
     });
+
+    logger.info('Marketplace listing created', {
+      listingId: listing.id,
+      personaId: persona_id,
+      price,
+      seller: req.walletAddress
+    });
+
+    res.status(201).json(listing);
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: 'Failed to list NFT'
-    });
+    next(error);
   }
 });
 
-// Buy NFT
-router.post('/:tokenId/buy', auth, rateLimit, async (req, res) => {
+/**
+ * POST /api/nft/marketplace/:id/buy
+ * Buy NFT from marketplace
+ */
+router.post('/marketplace/:id/buy', auth, async (req, res, next) => {
   try {
-    const { tokenId } = req.params;
+    const { payment_tx_hash } = req.body;
 
-    const nft = await NFT.findByTokenId(tokenId);
-    
-    if (!nft) {
-      return res.status(404).json({
-        success: false,
-        error: 'NFT not found'
+    if (!payment_tx_hash) {
+      throw new ValidationError('payment_tx_hash required');
+    }
+
+    const listing = await MarketplaceListing.findByPk(req.params.id, {
+      include: [{
+        model: Persona,
+        as: 'persona',
+        include: [{
+          model: User,
+          as: 'creator'
+        }]
+      }]
+    });
+
+    if (!listing) {
+      return res.status(404).json({ error: 'Listing not found' });
+    }
+
+    if (!listing.is_active) {
+      return res.status(400).json({ error: 'Listing not active' });
+    }
+
+    if (listing.seller_id === req.user.id) {
+      return res.status(400).json({ 
+        error: 'Cannot buy your own listing' 
       });
     }
 
-    if (!nft.isListed) {
-      return res.status(400).json({
-        success: false,
-        error: 'NFT is not listed for sale'
-      });
-    }
+    // TODO: Verify payment transaction on blockchain
+    // For now, trust the tx_hash
 
-    if (nft.ownerWallet === req.walletAddress) {
-      return res.status(400).json({
-        success: false,
-        error: 'Cannot buy your own NFT'
-      });
-    }
+    // Execute NFT transfer on blockchain
+    await blockchainService.transferNFT(
+      listing.persona.nft_token_id,
+      req.walletAddress,
+      payment_tx_hash
+    );
 
-    // In production, this would handle actual payment
-    // For demo, simulate purchase
-    await NFT.transferOwnership(tokenId, req.walletAddress);
+    // Update listing
+    await listing.update({
+      is_active: false,
+      sold_at: new Date(),
+      buyer_id: req.user.id
+    });
+
+    // Calculate fees (7.5% royalty to creator, 2% platform fee)
+    const price = parseFloat(listing.price);
+    const royalty = price * 0.075;
+    const platformFee = price * 0.02;
+    const sellerAmount = price - royalty - platformFee;
+
+    // Update revenues
+    await User.increment('total_revenue', {
+      by: royalty,
+      where: { id: listing.persona.creator_id }
+    });
+
+    logger.info('NFT sold on marketplace', {
+      listingId: listing.id,
+      personaId: listing.persona_id,
+      price,
+      buyer: req.walletAddress,
+      seller: listing.seller.wallet_address
+    });
 
     res.json({
-      success: true,
-      data: {
-        tokenId,
-        newOwner: req.walletAddress,
-        price: nft.listingPrice
-      },
-      message: 'NFT purchased successfully'
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: 'Failed to buy NFT'
-    });
-  }
-});
-
-// Get NFT details
-router.get('/:tokenId', rateLimit, async (req, res) => {
-  try {
-    const { tokenId } = req.params;
-
-    const nft = await NFT.findByTokenId(tokenId);
-    
-    if (!nft) {
-      return res.status(404).json({
-        success: false,
-        error: 'NFT not found'
-      });
-    }
-
-    const persona = await Persona.findByTokenId(tokenId);
-
-    res.json({
-      success: true,
-      data: {
-        nft,
-        persona
+      message: 'NFT purchased successfully',
+      tx_hash: payment_tx_hash,
+      breakdown: {
+        total: price,
+        royalty,
+        platform_fee: platformFee,
+        seller_amount: sellerAmount
       }
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: 'Failed to fetch NFT details'
-    });
+    next(error);
   }
 });
 
-// Get marketplace listings
-router.get('/marketplace/listings', rateLimit, async (req, res) => {
+/**
+ * DELETE /api/nft/marketplace/:id
+ * Cancel marketplace listing
+ */
+router.delete('/marketplace/:id', auth, async (req, res, next) => {
   try {
-    const { limit = 20, offset = 0 } = req.query;
-    
-    const listings = await NFT.findListings(parseInt(limit), parseInt(offset));
+    const listing = await MarketplaceListing.findByPk(req.params.id);
 
-    res.json({
-      success: true,
-      data: listings
+    if (!listing) {
+      return res.status(404).json({ error: 'Listing not found' });
+    }
+
+    if (listing.seller_id !== req.user.id) {
+      throw new ForbiddenError('You can only cancel your own listings');
+    }
+
+    if (!listing.is_active) {
+      return res.status(400).json({ error: 'Listing already inactive' });
+    }
+
+    await listing.update({ is_active: false });
+
+    logger.info('Marketplace listing cancelled', {
+      listingId: listing.id,
+      personaId: listing.persona_id
     });
+
+    res.json({ message: 'Listing cancelled successfully' });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: 'Failed to fetch marketplace listings'
-    });
+    next(error);
   }
 });
 
-export default router;
+module.exports = router;
