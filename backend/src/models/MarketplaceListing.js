@@ -1,5 +1,5 @@
-// backend/src/models/MarketplaceListing.js
-module.exports = (sequelize, DataTypes) => {
+// MarketplaceListing.js
+const MarketplaceListing = (sequelize, DataTypes) => {
   return sequelize.define('MarketplaceListing', {
     id: {
       type: DataTypes.UUID,
@@ -35,12 +35,10 @@ module.exports = (sequelize, DataTypes) => {
       defaultValue: true
     },
     sold_at: {
-      type: DataTypes.DATE,
-      allowNull: true
+      type: DataTypes.DATE
     },
     buyer_id: {
       type: DataTypes.UUID,
-      allowNull: true,
       references: {
         model: 'users',
         key: 'id'
