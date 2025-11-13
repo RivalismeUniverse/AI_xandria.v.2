@@ -17,15 +17,26 @@ const sequelize = new Sequelize(
 );
 
 // Import models
-const User = require('./User')(sequelize, Sequelize.DataTypes);
-const Persona = require('./Persona')(sequelize, Sequelize.DataTypes);
-const Battle = require('./Battle')(sequelize, Sequelize.DataTypes);
-const BattleVote = require('./BattleVote')(sequelize, Sequelize.DataTypes);
-const ChatSession = require('./ChatSession')(sequelize, Sequelize.DataTypes);
-const ChatMessage = require('./ChatMessage')(sequelize, Sequelize.DataTypes);
-const EvolutionLog = require('./EvolutionLog')(sequelize, Sequelize.DataTypes);
-const MarketplaceListing = require('./MarketplaceListing')(sequelize, Sequelize.DataTypes);
-const PersonaAnalytics = require('./PersonaAnalytics')(sequelize, Sequelize.DataTypes);
+const defineUser = require('./User');
+const definePersona = require('./Persona');
+const defineBattle = require('./Battle');
+const defineBattleVote = require('./BattleVote');
+const defineChatSession = require('./ChatSession');
+const defineChatMessage = require('./ChatMessage');
+const defineEvolutionLog = require('./EvolutionLog');
+const defineMarketplaceListing = require('./MarketplaceListing');
+const definePersonaAnalytics = require('./PersonaAnalytics');
+
+// Initialize models
+const User = defineUser(sequelize, Sequelize.DataTypes);
+const Persona = definePersona(sequelize, Sequelize.DataTypes);
+const Battle = defineBattle(sequelize, Sequelize.DataTypes);
+const BattleVote = defineBattleVote(sequelize, Sequelize.DataTypes);
+const ChatSession = defineChatSession(sequelize, Sequelize.DataTypes);
+const ChatMessage = defineChatMessage(sequelize, Sequelize.DataTypes);
+const EvolutionLog = defineEvolutionLog(sequelize, Sequelize.DataTypes);
+const MarketplaceListing = defineMarketplaceListing(sequelize, Sequelize.DataTypes);
+const PersonaAnalytics = definePersonaAnalytics(sequelize, Sequelize.DataTypes);
 
 // Define relationships
 const setupAssociations = () => {
