@@ -1,210 +1,257 @@
-// backend/src/routes/chat.js
-import express from 'express';
-import { auth } from '../middleware/auth.js';
-import { rateLimit } from '../middleware/rateLimit.js';
-import Chat from '../models/Chat.js';
-import Persona from '../models/Persona.js';
-import AWSBedrockService from '../services/aws-bedrock-service.js';
-
+const express = require('express');
 const router = express.Router();
+const { ChatSession, ChatMessage, Persona, User } = require('../models');
+const bedrockService = require('../services/aws-bedrock-service');
+const auth = require('../middleware/auth');
+const logger = require('../utils/logger');
+const { ValidationError } = require('../utils/errorHandler');
 
-// Start chat session
-router.post('/sessions', auth, rateLimit, async (req, res) => {
+/**
+ * POST /api/chat/unlock
+ * Unlock chat with persona (requires payment)
+ */
+router.post('/unlock', auth, async (req, res, next) => {
   try {
-    const { personaId } = req.body;
+    const { persona_id, payment_tx_hash, amount_paid } = req.body;
 
-    if (!personaId) {
-      return res.status(400).json({
-        success: false,
-        error: 'personaId is required'
-      });
+    if (!persona_id || !payment_tx_hash) {
+      throw new ValidationError('persona_id and payment_tx_hash required');
     }
 
-    const persona = await Persona.findById(personaId);
-    
+    const persona = await Persona.findByPk(persona_id);
     if (!persona) {
-      return res.status(404).json({
-        success: false,
-        error: 'Persona not found'
-      });
+      return res.status(404).json({ error: 'Persona not found' });
     }
 
-    const session = await Chat.createSession({
-      personaId,
-      userWallet: req.walletAddress,
-      personaName: persona.name
+    // TODO: Verify payment on blockchain
+    // For now, trust the tx_hash
+
+    // Create paid chat session
+    const session = await ChatSession.create({
+      user_id: req.user.id,
+      persona_id,
+      payment_tx_hash,
+      amount_paid: amount_paid || 0.1,
+      is_paid: true
     });
+
+    // Update persona stats
+    await persona.increment('total_chats');
+    
+    // Calculate revenue (80% to creator)
+    const creatorRevenue = parseFloat(amount_paid || 0.1) * 0.8;
+    await persona.increment('revenue_earned', { by: creatorRevenue });
+    await User.increment('total_revenue', { 
+      by: creatorRevenue,
+      where: { id: persona.creator_id }
+    });
+
+    logger.logPayment(req.user.id, persona_id, amount_paid, payment_tx_hash);
 
     res.status(201).json({
-      success: true,
-      data: session,
-      message: 'Chat session started'
+      session_id: session.id,
+      message: 'Chat unlocked successfully'
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: 'Failed to start chat session'
-    });
+    next(error);
   }
 });
 
-// Send message
-router.post('/sessions/:sessionId/messages', auth, rateLimit, async (req, res) => {
+/**
+ * GET /api/chat/sessions
+ * Get user's chat sessions
+ */
+router.get('/sessions', auth, async (req, res, next) => {
   try {
-    const { message } = req.body;
-    const { sessionId } = req.params;
+    const sessions = await ChatSession.findAll({
+      where: { user_id: req.user.id },
+      include: [{
+        model: Persona,
+        as: 'persona',
+        attributes: ['id', 'name', 'avatar_url']
+      }],
+      order: [['last_message_at', 'DESC']]
+    });
 
-    if (!message) {
-      return res.status(400).json({
-        success: false,
-        error: 'Message is required'
-      });
-    }
+    res.json(sessions);
+  } catch (error) {
+    next(error);
+  }
+});
 
-    const session = await Chat.getSession(sessionId);
-    
+/**
+ * GET /api/chat/sessions/:id
+ * Get specific chat session
+ */
+router.get('/sessions/:id', auth, async (req, res, next) => {
+  try {
+    const session = await ChatSession.findOne({
+      where: { 
+        id: req.params.id,
+        user_id: req.user.id 
+      },
+      include: [{
+        model: Persona,
+        as: 'persona'
+      }]
+    });
+
     if (!session) {
-      return res.status(404).json({
-        success: false,
-        error: 'Chat session not found'
-      });
+      return res.status(404).json({ error: 'Session not found' });
     }
 
-    if (session.userWallet !== req.walletAddress) {
-      return res.status(403).json({
-        success: false,
-        error: 'Not authorized for this chat session'
-      });
-    }
-
-    // Get persona
-    const persona = await Persona.findById(session.personaId);
-
-    // Get conversation history
-    const history = await Chat.getConversationHistory(sessionId);
-
-    // Generate AI response
-    const aiResponse = await AWSBedrockService.generatePersonaResponse(
-      persona,
-      message,
-      history
-    );
-
-    // Save both messages
-    await Chat.saveMessage(sessionId, 'user', message);
-    await Chat.saveMessage(sessionId, 'assistant', aiResponse.response);
-
-    // Update session activity
-    await Chat.updateSessionActivity(sessionId);
-
-    res.json({
-      success: true,
-      data: {
-        userMessage: message,
-        aiResponse: aiResponse.response,
-        usage: aiResponse.usage,
-        sessionId
-      }
-    });
+    res.json(session);
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: 'Failed to send message',
-      message: error.message
-    });
+    next(error);
   }
 });
 
-// Get chat history
-router.get('/sessions/:sessionId/messages', auth, rateLimit, async (req, res) => {
+/**
+ * GET /api/chat/sessions/:id/messages
+ * Get chat messages
+ */
+router.get('/sessions/:id/messages', auth, async (req, res, next) => {
   try {
-    const { sessionId } = req.params;
     const { limit = 50, offset = 0 } = req.query;
 
-    const session = await Chat.getSession(sessionId);
-    
+    // Verify session ownership
+    const session = await ChatSession.findOne({
+      where: { 
+        id: req.params.id,
+        user_id: req.user.id 
+      }
+    });
+
     if (!session) {
-      return res.status(404).json({
-        success: false,
-        error: 'Chat session not found'
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    const messages = await ChatMessage.findAll({
+      where: { session_id: req.params.id },
+      limit: parseInt(limit),
+      offset: parseInt(offset),
+      order: [['created_at', 'ASC']]
+    });
+
+    res.json(messages);
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /api/chat/sessions/:id/messages
+ * Send message to AI persona
+ */
+router.post('/sessions/:id/messages', auth, async (req, res, next) => {
+  try {
+    const { content } = req.body;
+
+    if (!content || content.trim().length === 0) {
+      throw new ValidationError('Message content required');
+    }
+
+    // Get session
+    const session = await ChatSession.findOne({
+      where: { 
+        id: req.params.id,
+        user_id: req.user.id 
+      },
+      include: [{
+        model: Persona,
+        as: 'persona'
+      }]
+    });
+
+    if (!session) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    if (!session.is_paid) {
+      return res.status(403).json({ 
+        error: 'Payment required',
+        message: 'Please unlock chat first'
       });
     }
 
-    if (session.userWallet !== req.walletAddress) {
-      return res.status(403).json({
-        success: false,
-        error: 'Not authorized for this chat session'
-      });
-    }
+    // Save user message
+    const userMessage = await ChatMessage.create({
+      session_id: session.id,
+      role: 'user',
+      content
+    });
 
-    const messages = await Chat.getConversationHistory(
-      sessionId,
-      parseInt(limit),
-      parseInt(offset)
+    // Get conversation history (last 10 messages)
+    const history = await ChatMessage.findAll({
+      where: { session_id: session.id },
+      limit: 10,
+      order: [['created_at', 'DESC']]
+    });
+
+    // Generate AI response using Bedrock
+    const aiResponse = await bedrockService.generateChatResponse(
+      session.persona,
+      history.reverse(),
+      content
     );
 
+    // Save AI message
+    const assistantMessage = await ChatMessage.create({
+      session_id: session.id,
+      role: 'assistant',
+      content: aiResponse
+    });
+
+    // Update session
+    await session.update({
+      message_count: session.message_count + 2,
+      last_message_at: new Date()
+    });
+
+    logger.info('Chat message exchanged', {
+      sessionId: session.id,
+      personaId: session.persona.id,
+      messageCount: session.message_count
+    });
+
     res.json({
-      success: true,
-      data: messages
+      user_message: userMessage,
+      assistant_message: assistantMessage
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: 'Failed to fetch chat history'
-    });
+    next(error);
   }
 });
 
-// End chat session
-router.post('/sessions/:sessionId/end', auth, rateLimit, async (req, res) => {
+/**
+ * DELETE /api/chat/sessions/:id
+ * Delete chat session
+ */
+router.delete('/sessions/:id', auth, async (req, res, next) => {
   try {
-    const { sessionId } = req.params;
+    const session = await ChatSession.findOne({
+      where: { 
+        id: req.params.id,
+        user_id: req.user.id 
+      }
+    });
 
-    const session = await Chat.getSession(sessionId);
-    
     if (!session) {
-      return res.status(404).json({
-        success: false,
-        error: 'Chat session not found'
-      });
+      return res.status(404).json({ error: 'Session not found' });
     }
 
-    if (session.userWallet !== req.walletAddress) {
-      return res.status(403).json({
-        success: false,
-        error: 'Not authorized for this chat session'
-      });
-    }
-
-    await Chat.endSession(sessionId);
-
-    res.json({
-      success: true,
-      message: 'Chat session ended successfully'
+    // Delete all messages first
+    await ChatMessage.destroy({
+      where: { session_id: session.id }
     });
+
+    // Delete session
+    await session.destroy();
+
+    res.json({ message: 'Session deleted successfully' });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: 'Failed to end chat session'
-    });
+    next(error);
   }
 });
 
-// Get user's chat sessions
-router.get('/sessions', auth, rateLimit, async (req, res) => {
-  try {
-    const sessions = await Chat.getUserSessions(req.walletAddress);
-
-    res.json({
-      success: true,
-      data: sessions
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: 'Failed to fetch chat sessions'
-    });
-  }
-});
-
-export default router;
+module.exports = router;
