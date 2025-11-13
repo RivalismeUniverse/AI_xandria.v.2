@@ -1,157 +1,314 @@
-// backend/src/routes/battle.js
-import express from 'express';
-import { rateLimit } from '../middleware/rateLimit.js';
-import Battle from '../models/Battle.js';
-import Persona from '../models/Persona.js';
-import AWSBedrockService from '../services/aws-bedrock-service.js';
-
+const express = require('express');
 const router = express.Router();
+const { Battle, Persona, BattleVote, User } = require('../models');
+const bedrockService = require('../services/aws-bedrock-service');
+const evolutionService = require('../services/evolutionService');
+const auth = require('../middleware/auth');
+const logger = require('../utils/logger');
 
-// Create new battle
-router.post('/', rateLimit, async (req, res) => {
+/**
+ * POST /api/battles
+ * Create new battle between two personas
+ */
+router.post('/', auth, async (req, res, next) => {
   try {
-    const { persona1Id, persona2Id, topic } = req.body;
+    const { persona1_id, persona2_id, topic } = req.body;
 
-    if (!persona1Id || !persona2Id || !topic) {
-      return res.status(400).json({
-        success: false,
-        error: 'Missing required fields: persona1Id, persona2Id, topic'
+    if (!persona1_id || !persona2_id || !topic) {
+      return res.status(400).json({ 
+        error: 'persona1_id, persona2_id, and topic are required' 
       });
     }
 
-    // Get personas
-    const persona1 = await Persona.findById(persona1Id);
-    const persona2 = await Persona.findById(persona2Id);
-
-    if (!persona1 || !persona2) {
-      return res.status(404).json({
-        success: false,
-        error: 'One or both personas not found'
+    if (persona1_id === persona2_id) {
+      return res.status(400).json({ 
+        error: 'Cannot battle a persona against itself' 
       });
     }
 
-    // Generate arguments using Bedrock
-    const [argument1, argument2] = await Promise.all([
-      AWSBedrockService.generateBattleArgument(persona1, topic),
-      AWSBedrockService.generateBattleArgument(persona2, topic, argument1?.argument)
+    // Fetch personas
+    const [persona1, persona2] = await Promise.all([
+      Persona.findByPk(persona1_id),
+      Persona.findByPk(persona2_id)
     ]);
 
-    // Create battle record
+    if (!persona1 || !persona2) {
+      return res.status(404).json({ error: 'One or both personas not found' });
+    }
+
+    // Create battle
     const battle = await Battle.create({
-      persona1Id,
-      persona2Id,
+      persona1_id,
+      persona2_id,
       topic,
-      arguments: {
-        persona1: argument1,
-        persona2: argument2
-      },
-      status: 'active'
+      status: 'pending'
     });
 
-    res.status(201).json({
-      success: true,
-      data: battle,
-      message: 'Battle created successfully'
+    // Generate arguments asynchronously
+    generateBattleArguments(battle.id, persona1, persona2, topic);
+
+    logger.info('Battle created', {
+      battleId: battle.id,
+      persona1: persona1.name,
+      persona2: persona2.name,
+      topic
     });
+
+    res.status(201).json(battle);
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: 'Failed to create battle',
-      message: error.message
-    });
+    next(error);
   }
 });
 
-// Vote on battle
-router.post('/:id/vote', rateLimit, async (req, res) => {
+/**
+ * Background task: Generate AI arguments using Bedrock
+ */
+async function generateBattleArguments(battleId, persona1, persona2, topic) {
   try {
-    const { voterWallet, votedFor } = req.body;
-    
-    if (!voterWallet || !votedFor) {
-      return res.status(400).json({
-        success: false,
-        error: 'Missing voterWallet or votedFor'
-      });
-    }
+    // Persona 1 opens
+    const arg1 = await bedrockService.generateBattleArgument(
+      persona1, 
+      topic
+    );
 
-    const battle = await Battle.vote(req.params.id, voterWallet, votedFor);
+    // Persona 2 responds
+    const arg2 = await bedrockService.generateBattleArgument(
+      persona2, 
+      topic, 
+      arg1
+    );
+
+    // Update battle
+    await Battle.update({
+      persona1_argument: arg1,
+      persona2_argument: arg2,
+      status: 'voting'
+    }, {
+      where: { id: battleId }
+    });
+
+    logger.info('Battle arguments generated', { battleId });
+  } catch (error) {
+    logger.error('Failed to generate battle arguments', { battleId, error });
+    await Battle.update({ status: 'failed' }, { where: { id: battleId } });
+  }
+}
+
+/**
+ * GET /api/battles
+ * List all battles
+ */
+router.get('/', async (req, res, next) => {
+  try {
+    const { 
+      page = 1, 
+      limit = 20, 
+      status = 'all' 
+    } = req.query;
+
+    const offset = (page - 1) * limit;
+    const where = status !== 'all' ? { status } : {};
+
+    const battles = await Battle.findAndCountAll({
+      where,
+      limit: parseInt(limit),
+      offset,
+      order: [['started_at', 'DESC']],
+      include: [
+        {
+          model: Persona,
+          as: 'persona1',
+          attributes: ['id', 'name', 'avatar_url']
+        },
+        {
+          model: Persona,
+          as: 'persona2',
+          attributes: ['id', 'name', 'avatar_url']
+        }
+      ]
+    });
 
     res.json({
-      success: true,
-      data: battle,
-      message: 'Vote recorded successfully'
+      battles: battles.rows,
+      total: battles.count,
+      page: parseInt(page),
+      totalPages: Math.ceil(battles.count / limit)
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: 'Failed to record vote'
-    });
+    next(error);
   }
 });
 
-// Get battle results
-router.get('/:id/results', rateLimit, async (req, res) => {
+/**
+ * GET /api/battles/:id
+ * Get battle details
+ */
+router.get('/:id', async (req, res, next) => {
   try {
-    const battle = await Battle.findById(req.params.id);
-    
+    const battle = await Battle.findByPk(req.params.id, {
+      include: [
+        {
+          model: Persona,
+          as: 'persona1',
+          include: [{
+            model: User,
+            as: 'creator',
+            attributes: ['username']
+          }]
+        },
+        {
+          model: Persona,
+          as: 'persona2',
+          include: [{
+            model: User,
+            as: 'creator',
+            attributes: ['username']
+          }]
+        }
+      ]
+    });
+
     if (!battle) {
-      return res.status(404).json({
-        success: false,
-        error: 'Battle not found'
+      return res.status(404).json({ error: 'Battle not found' });
+    }
+
+    res.json(battle);
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /api/battles/:id/vote
+ * Vote for a persona in battle
+ */
+router.post('/:id/vote', auth, async (req, res, next) => {
+  try {
+    const { voted_for } = req.body;
+    const battleId = req.params.id;
+
+    if (!voted_for) {
+      return res.status(400).json({ error: 'voted_for is required' });
+    }
+
+    const battle = await Battle.findByPk(battleId);
+
+    if (!battle) {
+      return res.status(404).json({ error: 'Battle not found' });
+    }
+
+    if (battle.status !== 'voting') {
+      return res.status(400).json({ 
+        error: 'Battle is not open for voting' 
       });
     }
 
-    const results = await Battle.calculateResults(req.params.id);
+    // Check if persona is in this battle
+    if (voted_for !== battle.persona1_id && voted_for !== battle.persona2_id) {
+      return res.status(400).json({ 
+        error: 'Invalid persona for this battle' 
+      });
+    }
 
-    res.json({
-      success: true,
-      data: {
-        battle,
-        results
+    // Check if user already voted
+    const existingVote = await BattleVote.findOne({
+      where: {
+        battle_id: battleId,
+        voter_id: req.user.id
       }
     });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: 'Failed to get battle results'
+
+    if (existingVote) {
+      return res.status(400).json({ error: 'You already voted in this battle' });
+    }
+
+    // Create vote
+    await BattleVote.create({
+      battle_id: battleId,
+      voter_id: req.user.id,
+      voted_for
     });
+
+    // Update vote counts
+    if (voted_for === battle.persona1_id) {
+      battle.persona1_votes += 1;
+    } else {
+      battle.persona2_votes += 1;
+    }
+
+    await battle.save();
+
+    logger.info('Vote cast', {
+      battleId,
+      voterId: req.user.id,
+      votedFor: voted_for
+    });
+
+    res.json({ 
+      message: 'Vote recorded',
+      persona1_votes: battle.persona1_votes,
+      persona2_votes: battle.persona2_votes
+    });
+  } catch (error) {
+    next(error);
   }
 });
 
-// Get active battles
-router.get('/active', rateLimit, async (req, res) => {
+/**
+ * POST /api/battles/:id/complete
+ * Complete battle and trigger evolution
+ */
+router.post('/:id/complete', auth, async (req, res, next) => {
   try {
-    const battles = await Battle.findActive();
-    
+    const battle = await Battle.findByPk(req.params.id, {
+      include: ['persona1', 'persona2']
+    });
+
+    if (!battle) {
+      return res.status(404).json({ error: 'Battle not found' });
+    }
+
+    if (battle.status === 'completed') {
+      return res.status(400).json({ error: 'Battle already completed' });
+    }
+
+    // Determine winner
+    const winner_id = battle.persona1_votes > battle.persona2_votes
+      ? battle.persona1_id
+      : battle.persona2_id;
+
+    // Update battle
+    battle.winner_id = winner_id;
+    battle.status = 'completed';
+    battle.completed_at = new Date();
+    await battle.save();
+
+    // Update persona stats
+    await Persona.increment('total_battles', {
+      where: { id: [battle.persona1_id, battle.persona2_id] }
+    });
+
+    await Persona.increment('total_wins', {
+      where: { id: winner_id }
+    });
+
+    // Trigger evolution
+    await evolutionService.evolveBattlePersonas(battle);
+
+    logger.info('Battle completed', {
+      battleId: battle.id,
+      winnerId: winner_id
+    });
+
     res.json({
-      success: true,
-      data: battles
+      message: 'Battle completed',
+      winner_id,
+      persona1_votes: battle.persona1_votes,
+      persona2_votes: battle.persona2_votes
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: 'Failed to fetch active battles'
-    });
+    next(error);
   }
 });
 
-// Get battle leaderboard
-router.get('/leaderboard', rateLimit, async (req, res) => {
-  try {
-    const { timeframe = 'all-time', limit = 10 } = req.query;
-    
-    const leaderboard = await Battle.getLeaderboard(timeframe, parseInt(limit));
-
-    res.json({
-      success: true,
-      data: leaderboard
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: 'Failed to fetch leaderboard'
-    });
-  }
-});
-
-export default router;
+module.exports = router;
