@@ -1,101 +1,114 @@
-import express from 'express'
-import cors from 'cors'
-import helmet from 'helmet'
-import compression from 'compression'
-import rateLimit from 'express-rate-limit'
+require('dotenv').config();
+const express = require('express');
+const cors = require('cors');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 
-import { errorHandler } from './utils/errorHandler.js'
-import { logger } from './utils/logger.js'
+// Routes
+const personaRoutes = require('./routes/persona');
+const battleRoutes = require('./routes/battle');
+const chatRoutes = require('./routes/chat');
+const nftRoutes = require('./routes/nft');
+const walletRoutes = require('./routes/wallet');
 
-// Import routes
-import personaRoutes from './routes/persona.js'
-import battleRoutes from './routes/battle.js'
-import chatRoutes from './routes/chat.js'
-import nftRoutes from './routes/nft.js'
-import walletRoutes from './routes/wallet.js'
+// Middleware
+const { errorHandler } = require('./utils/errorHandler');
+const logger = require('./utils/logger');
 
-const app = express()
+// Database
+const { sequelize } = require('./config/database');
 
-// Security middleware
-app.use(helmet({
-  crossOriginResourcePolicy: { policy: "cross-origin" }
-}))
-app.use(compression())
+const app = express();
+const PORT = process.env.PORT || 3000;
 
-// CORS configuration
+// Security & CORS
+app.use(helmet());
 app.use(cors({
   origin: process.env.NODE_ENV === 'production' 
-    ? ['https://your-amplify-app.amplifyapp.com']
-    : ['http://localhost:5173', 'http://localhost:3000'],
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
-}))
+    ? ['https://aixandria.demo.amplifyapp.com']
+    : ['http://localhost:5173'],
+  credentials: true
+}));
 
 // Rate limiting
 const limiter = rateLimit({
-  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000,
-  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100,
-  message: {
-    error: 'Too many requests from this IP, please try again later.'
-  },
-  standardHeaders: true,
-  legacyHeaders: false
-})
-app.use(limiter)
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // limit each IP to 100 requests per windowMs
+  message: 'Too many requests from this IP, please try again later.'
+});
+app.use('/api/', limiter);
 
-// Body parsing middleware
-app.use(express.json({ limit: '10mb' }))
-app.use(express.urlencoded({ extended: true, limit: '10mb' }))
+// Body parsing
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Request logging
+// Logging
 app.use((req, res, next) => {
   logger.info(`${req.method} ${req.path}`, {
     ip: req.ip,
-    userAgent: req.get('User-Agent'),
-    timestamp: new Date().toISOString()
-  })
-  next()
-})
+    userAgent: req.get('user-agent')
+  });
+  next();
+});
 
-// Health check endpoint
+// Health check
 app.get('/health', (req, res) => {
-  res.status(200).json({
-    status: 'healthy',
+  res.json({ 
+    status: 'healthy', 
     timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV,
-    version: '2.0.0'
-  })
-})
+    environment: process.env.NODE_ENV 
+  });
+});
 
-// API routes
-app.use('/api/personas', personaRoutes)
-app.use('/api/battles', battleRoutes)
-app.use('/api/chat', chatRoutes)
-app.use('/api/nft', nftRoutes)
-app.use('/api/wallet', walletRoutes)
+// API Routes
+app.use('/api/personas', personaRoutes);
+app.use('/api/battles', battleRoutes);
+app.use('/api/chat', chatRoutes);
+app.use('/api/nft', nftRoutes);
+app.use('/api/wallet', walletRoutes);
 
 // 404 handler
-app.use('*', (req, res) => {
-  res.status(404).json({
+app.use((req, res) => {
+  res.status(404).json({ 
     error: 'Route not found',
-    path: req.originalUrl,
-    method: req.method
-  })
-})
+    path: req.path 
+  });
+});
 
-// Global error handler
-app.use(errorHandler)
+// Error handler
+app.use(errorHandler);
 
-// Server startup
-const PORT = process.env.PORT || 3000
+// Database connection
+const startServer = async () => {
+  try {
+    await sequelize.authenticate();
+    logger.info('✅ Database connection established');
+    
+    // Sync models in development only
+    if (process.env.NODE_ENV === 'development') {
+      await sequelize.sync({ alter: false });
+      logger.info('✅ Database models synchronized');
+    }
+    
+    app.listen(PORT, () => {
+      logger.info(`🚀 Server running on port ${PORT}`);
+      logger.info(`📍 Environment: ${process.env.NODE_ENV}`);
+    });
+  } catch (error) {
+    logger.error('❌ Unable to start server:', error);
+    process.exit(1);
+  }
+};
 
-if (process.env.NODE_ENV !== 'production') {
-  app.listen(PORT, () => {
-    logger.info(`AI_XANDRIA Backend running on port ${PORT}`)
-    logger.info(`Environment: ${process.env.NODE_ENV}`)
-    logger.info(`Health check: http://localhost:${PORT}/health`)
-  })
+// Graceful shutdown
+process.on('SIGTERM', async () => {
+  logger.info('SIGTERM signal received: closing HTTP server');
+  await sequelize.close();
+  process.exit(0);
+});
+
+if (require.main === module) {
+  startServer();
 }
 
-export default app
+module.exports = app;
