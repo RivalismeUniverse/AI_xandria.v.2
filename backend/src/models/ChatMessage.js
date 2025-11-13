@@ -1,5 +1,7 @@
-module.exports = (sequelize, DataTypes) => {
-  const ChatMessage = sequelize.define('ChatMessage', {
+
+// ChatMessage.js
+const ChatMessage = (sequelize, DataTypes) => {
+  return sequelize.define('ChatMessage', {
     id: {
       type: DataTypes.UUID,
       defaultValue: DataTypes.UUIDV4,
@@ -36,6 +38,7 @@ module.exports = (sequelize, DataTypes) => {
       { fields: ['created_at'] }
     ]
   });
-  
-  return ChatMessage;
 };
+
+// Export both
+module.exports = { ChatMessage };
