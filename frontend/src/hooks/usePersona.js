@@ -1,111 +1,102 @@
-import { useState, useEffect } from 'react'
-import { apiService } from '../services/api'
-import { bedrockService } from '../services/aws-bedrock'
+import { useState, useEffect } from 'react';
+import { api } from '../services/api';
+import toast from 'react-hot-toast';
 
-export const usePersona = () => {
-  const [personas, setPersonas] = useState([])
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
+export const usePersona = (personaId = null) => {
+  const [persona, setPersona] = useState(null);
+  const [personas, setPersonas] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
 
-  // Load all personas on mount
   useEffect(() => {
-    loadPersonas()
-  }, [])
+    if (personaId) {
+      fetchPersona(personaId);
+    }
+  }, [personaId]);
 
-  const loadPersonas = async () => {
-    setLoading(true)
+  const fetchPersona = async (id) => {
+    setLoading(true);
     try {
-      const data = await apiService.getPersonas()
-      setPersonas(data)
+      const data = await api.getPersona(id);
+      setPersona(data);
+      return data;
     } catch (err) {
-      setError('Failed to load personas')
-      console.error('Error loading personas:', err)
+      setError(err.message);
+      toast.error('Failed to load persona');
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
-  const generatePersona = async (personaData) => {
-    setLoading(true)
-    setError('')
-    
+  const fetchPersonas = async (params = {}) => {
+    setLoading(true);
     try {
-      // Generate persona using Amazon Bedrock
-      const generatedPersona = await bedrockService.generatePersona(personaData)
-      
-      // Save to backend
-      const savedPersona = await apiService.createPersona(generatedPersona)
-      
-      // Update local state
-      setPersonas(prev => [savedPersona, ...prev])
-      
-      return savedPersona
-      
+      const data = await api.getPersonas(params);
+      setPersonas(data.personas);
+      return data;
     } catch (err) {
-      const errorMsg = err.message || 'Failed to generate persona'
-      setError(errorMsg)
-      console.error('Error generating persona:', err)
-      throw err
+      setError(err.message);
+      toast.error('Failed to load personas');
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
-  const getPersona = async (id) => {
+  const createPersona = async (data) => {
+    setLoading(true);
     try {
-      return await apiService.getPersona(id)
+      const newPersona = await api.createPersona(data);
+      toast.success(`${newPersona.name} created!`);
+      return newPersona;
     } catch (err) {
-      setError('Failed to fetch persona details')
-      console.error('Error fetching persona:', err)
-      throw err
+      setError(err.message);
+      toast.error('Failed to create persona');
+      throw err;
+    } finally {
+      setLoading(false);
     }
-  }
+  };
 
-  const updatePersona = async (id, updates) => {
+  const updatePersona = async (id, data) => {
+    setLoading(true);
     try {
-      const updatedPersona = await apiService.updatePersona(id, updates)
-      setPersonas(prev => 
-        prev.map(p => p.id === id ? updatedPersona : p)
-      )
-      return updatedPersona
+      const updated = await api.updatePersona(id, data);
+      setPersona(updated);
+      toast.success('Persona updated!');
+      return updated;
     } catch (err) {
-      setError('Failed to update persona')
-      console.error('Error updating persona:', err)
-      throw err
+      setError(err.message);
+      toast.error('Failed to update persona');
+      throw err;
+    } finally {
+      setLoading(false);
     }
-  }
+  };
 
   const deletePersona = async (id) => {
+    setLoading(true);
     try {
-      await apiService.deletePersona(id)
-      setPersonas(prev => prev.filter(p => p.id !== id))
+      await api.deletePersona(id);
+      toast.success('Persona deleted');
+      return true;
     } catch (err) {
-      setError('Failed to delete persona')
-      console.error('Error deleting persona:', err)
-      throw err
+      setError(err.message);
+      toast.error('Failed to delete persona');
+      throw err;
+    } finally {
+      setLoading(false);
     }
-  }
-
-  const generatePersonaImage = async (personaId, prompt) => {
-    try {
-      const imageUrl = await bedrockService.generatePersonaImage(personaId, prompt)
-      return imageUrl
-    } catch (err) {
-      setError('Failed to generate persona image')
-      console.error('Error generating image:', err)
-      throw err
-    }
-  }
+  };
 
   return {
+    persona,
     personas,
     loading,
     error,
-    generatePersona,
-    getPersona,
+    fetchPersona,
+    fetchPersonas,
+    createPersona,
     updatePersona,
-    deletePersona,
-    generatePersonaImage,
-    refreshPersonas: loadPersonas
-  }
-}
+    deletePersona
+  };
+};
