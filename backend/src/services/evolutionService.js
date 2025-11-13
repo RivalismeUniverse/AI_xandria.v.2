@@ -1,347 +1,172 @@
-// backend/src/services/evolutionService.js
-// Autonomous persona evolution logic
-// Personas evolve based on interactions, battles, and feedback
-
+const { Persona, EvolutionLog } = require('../models');
 const logger = require('../utils/logger');
-const db = require('../config/database');
 
+/**
+ * Evolution Service
+ * Handles AI persona trait evolution based on battle performance
+ */
 class EvolutionService {
+  
   /**
-   * Evolve persona after battle
+   * Evolve personas after battle completion
    */
-  async evolveBattleOutcome(personaId, isWinner, battleDetails) {
+  async evolveBattlePersonas(battle) {
     try {
-      logger.info(`Evolving persona ${personaId} after battle (winner: ${isWinner})`);
+      const winner = await Persona.findByPk(battle.winner_id);
+      const loserId = battle.winner_id === battle.persona1_id 
+        ? battle.persona2_id 
+        : battle.persona1_id;
+      const loser = await Persona.findByPk(loserId);
 
-      const persona = await this.getPersona(personaId);
-      const traits = persona.personality.traits || {};
-      const evolutionChanges = {};
+      const winMargin = Math.abs(battle.persona1_votes - battle.persona2_votes);
+      const totalVotes = battle.persona1_votes + battle.persona2_votes;
+      const marginPercent = totalVotes > 0 ? (winMargin / totalVotes) * 100 : 0;
 
-      if (isWinner) {
-        // Winner gains confidence, intelligence, strategy
-        evolutionChanges.intelligence = this.adjustTrait(traits.intelligence, +5, +10);
-        evolutionChanges.logic = this.adjustTrait(traits.logic, +3, +7);
-        evolutionChanges.creativity = this.adjustTrait(traits.creativity, +2, +5);
-        
-        // Small confidence boost
-        evolutionChanges.confidence = this.adjustTrait(traits.confidence || 50, +5, +8);
-      } else {
-        // Loser learns from defeat - different growth
-        evolutionChanges.empathy = this.adjustTrait(traits.empathy, +3, +6);
-        evolutionChanges.adaptability = this.adjustTrait(traits.adaptability || 50, +4, +8);
-        
-        // Small decrease in confidence but increase in learning
-        evolutionChanges.confidence = this.adjustTrait(traits.confidence || 50, -2, -5);
-        evolutionChanges.learning_rate = this.adjustTrait(traits.learning_rate || 50, +5, +10);
-      }
+      // Evolve winner
+      await this.evolveWinner(winner, marginPercent, battle.id);
 
-      // Apply topic-specific evolution
-      const battleTopic = battleDetails.topic.toLowerCase();
-      if (battleTopic.includes('technology') || battleTopic.includes('programming')) {
-        evolutionChanges.technical_knowledge = this.adjustTrait(
-          traits.technical_knowledge || 50, 
-          +3, 
-          +7
-        );
-      } else if (battleTopic.includes('art') || battleTopic.includes('creative')) {
-        evolutionChanges.creativity = this.adjustTrait(traits.creativity, +4, +8);
-      } else if (battleTopic.includes('social') || battleTopic.includes('philosophy')) {
-        evolutionChanges.empathy = this.adjustTrait(traits.empathy, +3, +6);
-      }
+      // Evolve loser
+      await this.evolveLoser(loser, marginPercent, battle.id);
 
-      // Update persona
-      await this.applyEvolution(personaId, evolutionChanges, {
-        reason: `Battle ${isWinner ? 'victory' : 'defeat'}`,
-        context: battleDetails.topic,
-        timestamp: new Date()
+      // Update ELO ratings
+      await this.updateEloRatings(winner, loser, marginPercent);
+
+      logger.info('Battle personas evolved', {
+        battleId: battle.id,
+        winnerId: winner.id,
+        loserId: loser.id,
+        marginPercent
       });
 
-      logger.info(`Persona ${personaId} evolved successfully`);
-
-      return {
-        success: true,
-        changes: evolutionChanges,
-        persona_id: personaId
-      };
     } catch (error) {
-      logger.error('Error evolving persona after battle:', error);
+      logger.error('Evolution failed', { battleId: battle.id, error });
       throw error;
     }
   }
 
   /**
-   * Evolve persona after chat interaction
+   * Evolve winner traits (positive adjustments)
    */
-  async evolveChatInteraction(personaId, chatData) {
-    try {
-      logger.info(`Evolving persona ${personaId} after chat interaction`);
+  async evolveWinner(persona, marginPercent, battleId) {
+    // Base evolution points (1-5 based on margin)
+    const evolutionPoints = Math.ceil(marginPercent / 20);
 
-      const persona = await this.getPersona(personaId);
-      const traits = persona.personality.traits || {};
-      const evolutionChanges = {};
+    const changes = {
+      persuasiveness: Math.min(3, evolutionPoints), // Winning = better persuasion
+      intelligence: Math.min(2, Math.floor(evolutionPoints / 2)),
+      creativity: Math.min(1, Math.floor(evolutionPoints / 3))
+    };
 
-      // Analyze sentiment
-      const { sentiment_score, message } = chatData;
-
-      if (sentiment_score > 0.7) {
-        // Positive interaction - increase empathy and humor
-        evolutionChanges.empathy = this.adjustTrait(traits.empathy, +2, +4);
-        evolutionChanges.humor = this.adjustTrait(traits.humor, +1, +3);
-      } else if (sentiment_score < 0.3) {
-        // Negative interaction - learn to be more empathetic
-        evolutionChanges.empathy = this.adjustTrait(traits.empathy, +3, +6);
-        evolutionChanges.patience = this.adjustTrait(traits.patience || 50, +2, +5);
-      }
-
-      // Increase communication skills over time
-      evolutionChanges.communication = this.adjustTrait(
-        traits.communication || 50, 
-        +1, 
-        +2
-      );
-
-      // Analyze message complexity and adapt
-      const messageLength = message.split(' ').length;
-      if (messageLength > 50) {
-        // Long, detailed message - user expects depth
-        evolutionChanges.depth = this.adjustTrait(traits.depth || 50, +2, +4);
-      }
-
-      await this.applyEvolution(personaId, evolutionChanges, {
-        reason: 'Chat interaction',
-        sentiment: sentiment_score,
-        timestamp: new Date()
-      });
-
-      return {
-        success: true,
-        changes: evolutionChanges
-      };
-    } catch (error) {
-      logger.error('Error evolving persona after chat:', error);
-      throw error;
-    }
+    await this.applyTraitChanges(persona, changes, battleId, 'victory');
   }
 
   /**
-   * Evolve persona based on user feedback
+   * Evolve loser traits (adaptive adjustments)
    */
-  async evolveUserFeedback(personaId, feedbackData) {
-    try {
-      const { rating, comments } = feedbackData;
-      const persona = await this.getPersona(personaId);
-      const traits = persona.personality.traits || {};
-      const evolutionChanges = {};
+  async evolveLoser(persona, marginPercent, battleId) {
+    // Losers adapt by learning
+    const evolutionPoints = Math.ceil(marginPercent / 30);
 
-      if (rating >= 4) {
-        // Positive feedback - reinforce current traits
-        Object.keys(traits).forEach(trait => {
-          evolutionChanges[trait] = this.adjustTrait(traits[trait], +1, +3);
+    const changes = {
+      intelligence: Math.min(2, evolutionPoints), // Learn from mistakes
+      creativity: Math.min(2, evolutionPoints), // Try new approaches
+      persuasiveness: -Math.min(1, Math.floor(evolutionPoints / 2)) // Lost persuasion
+    };
+
+    await this.applyTraitChanges(persona, changes, battleId, 'defeat');
+  }
+
+  /**
+   * Apply trait changes to persona
+   */
+  async applyTraitChanges(persona, changes, battleId, reason) {
+    const updates = {};
+
+    for (const [trait, change] of Object.entries(changes)) {
+      const currentValue = persona[trait];
+      const newValue = Math.max(0, Math.min(100, currentValue + change));
+
+      if (newValue !== currentValue) {
+        updates[trait] = newValue;
+
+        // Log evolution
+        await EvolutionLog.create({
+          persona_id: persona.id,
+          battle_id: battleId,
+          trait_changed: trait,
+          old_value: currentValue,
+          new_value: newValue,
+          reason: `${reason}: ${change > 0 ? '+' : ''}${change} points`
         });
-      } else if (rating <= 2) {
-        // Negative feedback - diversify traits
-        evolutionChanges.adaptability = this.adjustTrait(
-          traits.adaptability || 50, 
-          +5, 
-          +10
-        );
       }
+    }
 
-      // Analyze comments for specific improvements
-      if (comments) {
-        const lowerComments = comments.toLowerCase();
-        
-        if (lowerComments.includes('funny') || lowerComments.includes('humor')) {
-          evolutionChanges.humor = this.adjustTrait(traits.humor, +5, +10);
-        }
-        
-        if (lowerComments.includes('smart') || lowerComments.includes('intelligent')) {
-          evolutionChanges.intelligence = this.adjustTrait(traits.intelligence, +3, +7);
-        }
-        
-        if (lowerComments.includes('kind') || lowerComments.includes('empathetic')) {
-          evolutionChanges.empathy = this.adjustTrait(traits.empathy, +4, +8);
-        }
-      }
-
-      await this.applyEvolution(personaId, evolutionChanges, {
-        reason: 'User feedback',
-        rating,
-        timestamp: new Date()
+    if (Object.keys(updates).length > 0) {
+      await persona.update(updates);
+      logger.info('Traits evolved', {
+        personaId: persona.id,
+        changes: updates
       });
-
-      return {
-        success: true,
-        changes: evolutionChanges
-      };
-    } catch (error) {
-      logger.error('Error evolving persona from feedback:', error);
-      throw error;
     }
   }
 
   /**
-   * Natural evolution over time (passive growth)
+   * Update ELO ratings based on battle outcome
    */
-  async evolveNaturally(personaId) {
-    try {
-      const persona = await this.getPersona(personaId);
-      const traits = persona.personality.traits || {};
-      const evolutionChanges = {};
+  async updateEloRatings(winner, loser, marginPercent) {
+    const K = 32; // K-factor for ELO calculation
 
-      // Small random improvements to simulate natural learning
-      const traitsList = Object.keys(traits);
-      const randomTrait = traitsList[Math.floor(Math.random() * traitsList.length)];
-      
-      evolutionChanges[randomTrait] = this.adjustTrait(traits[randomTrait], +1, +2);
-      
-      // Wisdom increases naturally over time
-      evolutionChanges.wisdom = this.adjustTrait(traits.wisdom || 50, +1, +3);
+    const winnerElo = winner.elo_rating || 1200;
+    const loserElo = loser.elo_rating || 1200;
 
-      await this.applyEvolution(personaId, evolutionChanges, {
-        reason: 'Natural evolution',
-        timestamp: new Date()
-      });
+    // Expected scores
+    const expectedWinner = 1 / (1 + Math.pow(10, (loserElo - winnerElo) / 400));
+    const expectedLoser = 1 - expectedWinner;
 
-      return {
-        success: true,
-        changes: evolutionChanges
-      };
-    } catch (error) {
-      logger.error('Error in natural evolution:', error);
-      throw error;
-    }
+    // Actual scores (1 for win, 0 for loss)
+    const actualWinner = 1;
+    const actualLoser = 0;
+
+    // New ratings
+    const newWinnerElo = Math.round(winnerElo + K * (actualWinner - expectedWinner));
+    const newLoserElo = Math.round(loserElo + K * (actualLoser - expectedLoser));
+
+    await winner.update({ elo_rating: newWinnerElo });
+    await loser.update({ elo_rating: newLoserElo });
+
+    logger.info('ELO ratings updated', {
+      winner: { id: winner.id, old: winnerElo, new: newWinnerElo },
+      loser: { id: loser.id, old: loserElo, new: newLoserElo }
+    });
   }
 
   /**
-   * Apply evolution changes to persona
-   */
-  async applyEvolution(personaId, changes, metadata) {
-    try {
-      const persona = await this.getPersona(personaId);
-      const currentTraits = persona.personality.traits || {};
-
-      // Merge changes
-      const newTraits = { ...currentTraits };
-      Object.entries(changes).forEach(([trait, change]) => {
-        newTraits[trait] = Math.min(100, Math.max(0, (currentTraits[trait] || 50) + change));
-      });
-
-      // Update personality
-      const updatedPersonality = {
-        ...persona.personality,
-        traits: newTraits
-      };
-
-      // Add to evolution log
-      const evolutionLog = persona.memory?.evolutionLog || [];
-      evolutionLog.push({
-        changes,
-        metadata,
-        timestamp: new Date(),
-        traits_snapshot: newTraits
-      });
-
-      // Keep only last 50 evolution logs
-      if (evolutionLog.length > 50) {
-        evolutionLog.shift();
-      }
-
-      // Update database
-      await db.query(
-        `UPDATE personas 
-         SET personality = $1, 
-             memory = jsonb_set(COALESCE(memory, '{}'::jsonb), '{evolutionLog}', $2::jsonb),
-             updated_at = NOW()
-         WHERE id = $3`,
-        [
-          JSON.stringify(updatedPersonality),
-          JSON.stringify(evolutionLog),
-          personaId
-        ]
-      );
-
-      logger.info(`Evolution applied to persona ${personaId}`);
-
-      return {
-        success: true,
-        new_traits: newTraits,
-        changes
-      };
-    } catch (error) {
-      logger.error('Error applying evolution:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Adjust trait value with random variation
-   */
-  adjustTrait(currentValue = 50, minChange, maxChange) {
-    const change = Math.floor(Math.random() * (maxChange - minChange + 1)) + minChange;
-    return change;
-  }
-
-  /**
-   * Get persona data
-   */
-  async getPersona(personaId) {
-    const result = await db.query(
-      'SELECT * FROM personas WHERE id = $1',
-      [personaId]
-    );
-
-    if (result.rows.length === 0) {
-      throw new Error('Persona not found');
-    }
-
-    return result.rows[0];
-  }
-
-  /**
-   * Get evolution history
+   * Get evolution history for persona
    */
   async getEvolutionHistory(personaId, limit = 20) {
-    try {
-      const persona = await this.getPersona(personaId);
-      const evolutionLog = persona.memory?.evolutionLog || [];
-
-      return evolutionLog.slice(-limit).reverse();
-    } catch (error) {
-      logger.error('Error fetching evolution history:', error);
-      throw error;
-    }
+    return await EvolutionLog.findAll({
+      where: { persona_id: personaId },
+      limit,
+      order: [['created_at', 'DESC']],
+      include: ['battle']
+    });
   }
 
   /**
-   * Calculate evolution score
+   * Calculate evolution score (how much persona has evolved)
    */
-  calculateEvolutionScore(persona) {
-    const traits = persona.personality.traits || {};
-    const evolutionLog = persona.memory?.evolutionLog || [];
+  async calculateEvolutionScore(personaId) {
+    const logs = await EvolutionLog.findAll({
+      where: { persona_id: personaId }
+    });
 
-    // Average trait value
-    const avgTrait = Object.values(traits).reduce((a, b) => a + b, 0) / Object.keys(traits).length;
+    let totalChange = 0;
+    for (const log of logs) {
+      totalChange += Math.abs(log.new_value - log.old_value);
+    }
 
-    // Growth rate (how much persona has evolved)
-    const growthRate = evolutionLog.length * 0.5;
-
-    // Battle performance
-    const battleScore = persona.total_battles > 0 
-      ? (persona.battle_wins / persona.total_battles) * 100
-      : 0;
-
-    // Overall evolution score
-    const evolutionScore = (avgTrait * 0.5) + (growthRate * 0.3) + (battleScore * 0.2);
-
-    return {
-      total_score: Math.round(evolutionScore),
-      avg_trait_value: Math.round(avgTrait),
-      evolution_count: evolutionLog.length,
-      battle_win_rate: Math.round(battleScore)
-    };
+    return totalChange;
   }
 }
 
-// Export singleton instance
 module.exports = new EvolutionService();
