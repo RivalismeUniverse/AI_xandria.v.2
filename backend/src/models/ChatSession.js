@@ -1,5 +1,5 @@
-// backend/src/models/ChatSession.js
-module.exports = (sequelize, DataTypes) => {
+// ChatSession.js
+const ChatSession = (sequelize, DataTypes) => {
   return sequelize.define('ChatSession', {
     id: {
       type: DataTypes.UUID,
@@ -54,3 +54,4 @@ module.exports = (sequelize, DataTypes) => {
     ]
   });
 };
+module.exports = { ChatSession };
