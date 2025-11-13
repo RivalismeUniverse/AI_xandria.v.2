@@ -1,28 +1,44 @@
-// backend/src/config/aws-config.js
-import { BedrockRuntimeClient } from '@aws-sdk/client-bedrock-runtime';
-import { S3Client } from '@aws-sdk/client-s3';
-import { RDSDataClient } from '@aws-sdk/client-rds-data';
+require('dotenv').config();
 
-export const bedrockRuntime = new BedrockRuntimeClient({
+/**
+ * AWS SDK Configuration
+ */
+module.exports = {
   region: process.env.AWS_REGION || 'us-east-1',
-  maxAttempts: 3
-});
+  
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
+  },
 
-export const s3Client = new S3Client({
-  region: process.env.AWS_REGION || 'us-east-1'
-});
+  bedrock: {
+    region: process.env.BEDROCK_REGION || 'us-east-1',
+    modelId: 'anthropic.claude-3-5-sonnet-20241022-v2:0',
+    maxTokens: 2000,
+    temperature: 0.7
+  },
 
-export const rdsDataClient = new RDSDataClient({
-  region: process.env.AWS_REGION || 'us-east-1'
-});
+  s3: {
+    bucket: process.env.S3_BUCKET || 'ai-xandria-metadata',
+    region: process.env.AWS_REGION || 'us-east-1'
+  },
 
-export const AWS_CONFIG = {
-  region: process.env.AWS_REGION || 'us-east-1',
-  bedrockModel: process.env.BEDROCK_MODEL || 'anthropic.claude-3-5-sonnet-20241022-v2:0',
-  bedrockImageModel: process.env.BEDROCK_IMAGE_MODEL || 'amazon.titan-image-generator-v1',
-  s3Buckets: {
-    personas: process.env.S3_PERSONAS_BUCKET || 'ai-xandria-dev-personas',
-    nfts: process.env.S3_NFTS_BUCKET || 'ai-xandria-dev-nfts',
-    battles: process.env.S3_BATTLES_BUCKET || 'ai-xandria-dev-battles'
+  cloudWatch: {
+    logGroupPrefix: '/ai-xandria',
+    logStreams: {
+      battles: 'battles',
+      evolution: 'evolution',
+      bedrock: 'bedrock-calls',
+      payments: 'payments',
+      errors: 'errors'
+    }
+  },
+
+  rds: {
+    host: process.env.RDS_HOST,
+    port: parseInt(process.env.RDS_PORT || '5432'),
+    database: process.env.RDS_DATABASE,
+    username: process.env.RDS_USERNAME,
+    password: process.env.RDS_PASSWORD
   }
 };
