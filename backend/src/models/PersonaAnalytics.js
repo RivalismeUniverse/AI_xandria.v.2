@@ -1,6 +1,5 @@
-// PersonaAnalytics.js
-const PersonaAnalytics = (sequelize, DataTypes) => {
-  return sequelize.define('PersonaAnalytics', {
+module.exports = (sequelize, DataTypes) => {
+  const PersonaAnalytics = sequelize.define('PersonaAnalytics', {
     id: {
       type: DataTypes.UUID,
       defaultValue: DataTypes.UUIDV4,
@@ -48,5 +47,6 @@ const PersonaAnalytics = (sequelize, DataTypes) => {
       }
     ]
   });
+  
+  return PersonaAnalytics;
 };
-module.exports = { PersonaAnalytics };
