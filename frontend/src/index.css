@@ -1,0 +1,182 @@
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&display=swap');
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  /* Cosmic Purple Theme */
+  --cosmic-primary: #ff00ff;
+  --cosmic-secondary: #a020f0;
+  --cosmic-accent: #00ffff;
+  --cosmic-success: #00ff00;
+  --cosmic-danger: #ff4444;
+  --cosmic-warning: #ffaa00;
+  
+  /* Backgrounds */
+  --bg-primary: #0a0010;
+  --bg-secondary: #1a1a2e;
+  --bg-card: rgba(15, 0, 30, 0.98);
+  --bg-overlay: rgba(0, 0, 0, 0.6);
+  
+  /* Text */
+  --text-primary: #ffffff;
+  --text-secondary: #cbd5e1;
+  --text-muted: #888888;
+  
+  /* Borders */
+  --border-primary: rgba(255, 0, 255, 0.6);
+  --border-secondary: rgba(160, 32, 240, 0.4);
+}
+
+body {
+  font-family: 'Orbitron', sans-serif;
+  background: radial-gradient(circle at center, var(--bg-primary) 30%, #000 100%);
+  color: var(--text-primary);
+  overflow-x: hidden;
+  min-height: 100vh;
+}
+
+/* Cosmic Animations */
+@keyframes cosmicPulse {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+@keyframes neonGlow {
+  0%, 100% { box-shadow: 0 0 10px var(--cosmic-primary), 0 0 20px var(--cosmic-secondary); }
+  50% { box-shadow: 0 0 20px var(--cosmic-primary), 0 0 40px var(--cosmic-secondary); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideUp {
+  from { transform: translateY(100%); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+/* Cosmic Gradient Text */
+.cosmic-text {
+  background: linear-gradient(90deg, var(--cosmic-primary), var(--cosmic-secondary), var(--cosmic-primary));
+  background-size: 400% 400%;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: cosmicPulse 6s ease-in-out infinite;
+}
+
+/* Neon Button */
+.neon-btn {
+  padding: 0.8rem 1.5rem;
+  border: 2px solid var(--cosmic-primary);
+  background: rgba(255, 0, 255, 0.1);
+  color: var(--cosmic-primary);
+  border-radius: 25px;
+  font-family: 'Orbitron', sans-serif;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  backdrop-filter: blur(10px);
+}
+
+.neon-btn:hover {
+  background: var(--cosmic-primary);
+  color: #000;
+  box-shadow: 0 0 20px var(--cosmic-primary);
+  transform: translateY(-2px);
+}
+
+.neon-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Card Styles */
+.cosmic-card {
+  background: var(--bg-card);
+  backdrop-filter: blur(25px);
+  border-radius: 20px;
+  border: 2px solid var(--border-primary);
+  padding: 1.5rem;
+  box-shadow: 0 0 40px rgba(255, 0, 255, 0.3);
+  transition: all 0.3s ease;
+}
+
+.cosmic-card:hover {
+  border-color: var(--cosmic-secondary);
+  box-shadow: 0 0 60px rgba(160, 32, 240, 0.5);
+  transform: translateY(-4px);
+}
+
+/* Input Styles */
+.cosmic-input {
+  width: 100%;
+  padding: 0.8rem 1rem;
+  background: rgba(255, 0, 255, 0.1);
+  border: 1px solid rgba(255, 0, 255, 0.3);
+  border-radius: 10px;
+  color: white;
+  font-family: 'Orbitron', sans-serif;
+  font-size: 0.9rem;
+  transition: all 0.3s;
+}
+
+.cosmic-input:focus {
+  outline: none;
+  border-color: var(--cosmic-secondary);
+  box-shadow: 0 0 10px rgba(160, 32, 240, 0.5);
+  background: rgba(255, 0, 255, 0.15);
+}
+
+.cosmic-input::placeholder {
+  color: var(--text-muted);
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-primary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, var(--cosmic-primary), var(--cosmic-secondary));
+  border-radius: 5px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--cosmic-primary);
+}
+
+/* Loading Spinner */
+.cosmic-spinner {
+  border: 3px solid rgba(255, 0, 255, 0.1);
+  border-top: 3px solid var(--cosmic-primary);
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .neon-btn {
+    padding: 0.6rem 1rem;
+    font-size: 0.85rem;
+  }
+  
+  .cosmic-card {
+    padding: 1rem;
+  }
+}
