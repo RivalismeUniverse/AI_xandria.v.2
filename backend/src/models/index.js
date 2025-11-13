@@ -24,7 +24,6 @@ const BattleVote = require('./BattleVote')(sequelize, Sequelize.DataTypes);
 const ChatSession = require('./ChatSession')(sequelize, Sequelize.DataTypes);
 const ChatMessage = require('./ChatMessage')(sequelize, Sequelize.DataTypes);
 const EvolutionLog = require('./EvolutionLog')(sequelize, Sequelize.DataTypes);
-const MarketplaceListing = require('./MarketplaceListing')(sequelize, Sequelize.DataTypes);
 const PersonaAnalytics = require('./PersonaAnalytics')(sequelize, Sequelize.DataTypes);
 
 // Define relationships
@@ -33,7 +32,7 @@ const setupAssociations = () => {
   User.hasMany(Persona, { foreignKey: 'creator_id', as: 'personas' });
   User.hasMany(BattleVote, { foreignKey: 'voter_id', as: 'votes' });
   User.hasMany(ChatSession, { foreignKey: 'user_id', as: 'chatSessions' });
-  User.hasMany(MarketplaceListing, { foreignKey: 'seller_id', as: 'listings' });
+  
 
   // Persona relationships
   Persona.belongsTo(User, { foreignKey: 'creator_id', as: 'creator' });
@@ -41,7 +40,6 @@ const setupAssociations = () => {
   Persona.hasMany(Battle, { foreignKey: 'persona2_id', as: 'battles2' });
   Persona.hasMany(ChatSession, { foreignKey: 'persona_id', as: 'chatSessions' });
   Persona.hasMany(EvolutionLog, { foreignKey: 'persona_id', as: 'evolutionLogs' });
-  Persona.hasMany(MarketplaceListing, { foreignKey: 'persona_id', as: 'listings' });
   Persona.hasMany(PersonaAnalytics, { foreignKey: 'persona_id', as: 'analytics' });
 
   // Battle relationships
