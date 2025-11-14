@@ -1,4 +1,3 @@
-// ChatSession.js - Export as function
 module.exports = (sequelize, DataTypes) => {
   const ChatSession = sequelize.define('ChatSession', {
     id: {
@@ -56,4 +55,3 @@ module.exports = (sequelize, DataTypes) => {
   
   return ChatSession;
 };
-module.exports = { ChatSession }
