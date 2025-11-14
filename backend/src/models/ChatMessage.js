@@ -38,7 +38,6 @@ const ChatMessage = (sequelize, DataTypes) => {
       { fields: ['created_at'] }
     ]
   });
+  return User;
 };
 
-// Export both
-module.exports = { ChatMessage };
