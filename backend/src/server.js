@@ -12,7 +12,7 @@ const nftRoutes = require('./routes/nft');
 const walletRoutes = require('./routes/wallet');
 
 // Middleware
-const { errorHandler } = require('./utils/errorHandler');
+const { errorHandler, notFound } = require('./middleware/errorHandler');
 const logger = require('./utils/logger');
 
 // Database
@@ -24,16 +24,16 @@ const PORT = process.env.PORT || 3000;
 // Security & CORS
 app.use(helmet());
 app.use(cors({
-  origin: process.env.NODE_ENV === 'production' 
+  origin: process.env.NODE_ENV === 'production'
     ? ['https://aixandria.demo.amplifyapp.com']
-    : ['http://localhost:5173'],
+    : ['http://localhost:5173', 'http://localhost:3000'],
   credentials: true
 }));
 
 // Rate limiting
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
+  windowMs: 15 * 60 * 1000,
+  max: 100,
   message: 'Too many requests from this IP, please try again later.'
 });
 app.use('/api/', limiter);
@@ -42,7 +42,7 @@ app.use('/api/', limiter);
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Logging
+// Request logging
 app.use((req, res, next) => {
   logger.info(`${req.method} ${req.path}`, {
     ip: req.ip,
@@ -52,12 +52,22 @@ app.use((req, res, next) => {
 });
 
 // Health check
-app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'healthy', 
-    timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV 
-  });
+app.get('/health', async (req, res) => {
+  try {
+    await sequelize.authenticate();
+    res.json({
+      status: 'healthy',
+      timestamp: new Date().toISOString(),
+      environment: process.env.NODE_ENV,
+      database: 'connected'
+    });
+  } catch (error) {
+    res.status(503).json({
+      status: 'unhealthy',
+      timestamp: new Date().toISOString(),
+      error: error.message
+    });
+  }
 });
 
 // API Routes
@@ -68,14 +78,9 @@ app.use('/api/nft', nftRoutes);
 app.use('/api/wallet', walletRoutes);
 
 // 404 handler
-app.use((req, res) => {
-  res.status(404).json({ 
-    error: 'Route not found',
-    path: req.path 
-  });
-});
+app.use(notFound);
 
-// Error handler
+// Error handler (must be last)
 app.use(errorHandler);
 
 // Database connection
@@ -83,17 +88,20 @@ const startServer = async () => {
   try {
     await sequelize.authenticate();
     logger.info('✅ Database connection established');
-    
+
     // Sync models in development only
     if (process.env.NODE_ENV === 'development') {
       await sequelize.sync({ alter: false });
       logger.info('✅ Database models synchronized');
     }
-    
-    app.listen(PORT, () => {
-      logger.info(`🚀 Server running on port ${PORT}`);
-      logger.info(`📍 Environment: ${process.env.NODE_ENV}`);
-    });
+
+    // Only start server if not running in Lambda
+    if (require.main === module) {
+      app.listen(PORT, () => {
+        logger.info(`🚀 Server running on port ${PORT}`);
+        logger.info(`🌍 Environment: ${process.env.NODE_ENV}`);
+      });
+    }
   } catch (error) {
     logger.error('❌ Unable to start server:', error);
     process.exit(1);
@@ -107,6 +115,7 @@ process.on('SIGTERM', async () => {
   process.exit(0);
 });
 
+// Start server
 if (require.main === module) {
   startServer();
 }
