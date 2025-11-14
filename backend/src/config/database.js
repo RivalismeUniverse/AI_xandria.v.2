@@ -1,6 +1,7 @@
 require('dotenv').config();
+const { Sequelize } = require('sequelize');
 
-module.exports = {
+const config = {
   development: {
     username: process.env.RDS_USERNAME || 'postgres',
     password: process.env.RDS_PASSWORD || 'postgres',
@@ -16,7 +17,6 @@ module.exports = {
       idle: 10000
     }
   },
-  
   production: {
     username: process.env.RDS_USERNAME,
     password: process.env.RDS_PASSWORD,
@@ -37,15 +37,19 @@ module.exports = {
         rejectUnauthorized: false
       }
     }
-  },
-  
-  test: {
-    username: 'postgres',
-    password: 'postgres',
-    database: 'aixandria_test',
-    host: 'localhost',
-    port: 5432,
-    dialect: 'postgres',
-    logging: false
   }
-}[process.env.NODE_ENV || 'development'];
+};
+
+const env = process.env.NODE_ENV || 'development';
+const dbConfig = config[env];
+
+// ✅ FIX: Export both config and sequelize instance
+const sequelize = new Sequelize(
+  dbConfig.database,
+  dbConfig.username,
+  dbConfig.password,
+  dbConfig
+);
+
+module.exports = dbConfig;
+module.exports.sequelize = sequelize;
