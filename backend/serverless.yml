@@ -9,7 +9,6 @@ provider:
   stage: ${opt:stage, 'dev'}
   timeout: 30
   memorySize: 512
-  
   environment:
     NODE_ENV: ${self:provider.stage}
     BEDROCK_REGION: us-east-1
@@ -22,7 +21,7 @@ provider:
     JWT_SECRET: ${env:JWT_SECRET}
     BLOCKCHAIN_RPC: ${env:BLOCKCHAIN_RPC}
     CONTRACT_ADDRESS: ${env:CONTRACT_ADDRESS}
-  
+
   iam:
     role:
       statements:
@@ -45,7 +44,7 @@ provider:
           Resource: "*"
         - Effect: Allow
           Action:
-            - rds:DescribeDBInstances
+            - rds-db:connect
           Resource: "*"
 
 functions:
