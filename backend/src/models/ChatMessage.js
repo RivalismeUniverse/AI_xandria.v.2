@@ -1,7 +1,5 @@
-
-// ChatMessage.js
-const ChatMessage = (sequelize, DataTypes) => {
-  return sequelize.define('ChatMessage', {
+module.exports = (sequelize, DataTypes) => {
+  const ChatMessage = sequelize.define('ChatMessage', {
     id: {
       type: DataTypes.UUID,
       defaultValue: DataTypes.UUIDV4,
@@ -38,6 +36,6 @@ const ChatMessage = (sequelize, DataTypes) => {
       { fields: ['created_at'] }
     ]
   });
-  return User;
-};
 
+  return ChatMessage; // ✅ FIX: return ChatMessage, bukan User
+};
