@@ -1,53 +1,41 @@
+const { Sequelize } = require('sequelize');
 require('dotenv').config();
 
-const config = {
-  development: {
-    username: process.env.RDS_USERNAME || 'postgres',
-    password: process.env.RDS_PASSWORD || 'postgres',
-    database: process.env.RDS_DATABASE || 'aixandria',
+const sequelize = new Sequelize(
+  process.env.RDS_DATABASE || 'ai_xandria',
+  process.env.RDS_USERNAME || 'postgres',
+  process.env.RDS_PASSWORD,
+  {
     host: process.env.RDS_HOST || 'localhost',
     port: process.env.RDS_PORT || 5432,
     dialect: 'postgres',
-    logging: console.log,
+    logging: process.env.NODE_ENV === 'development' ? console.log : false,
     pool: {
-      max: 5,
+      max: 10,
       min: 0,
       acquire: 30000,
       idle: 10000
-    }
-  },
-  production: {
-    username: process.env.RDS_USERNAME,
-    password: process.env.RDS_PASSWORD,
-    database: process.env.RDS_DATABASE,
-    host: process.env.RDS_HOST,
-    port: process.env.RDS_PORT || 5432,
-    dialect: 'postgres',
-    logging: false,
-    pool: {
-      max: 10,
-      min: 2,
-      acquire: 30000,
-      idle: 10000
     },
-    dialectOptions: {
+    dialectOptions: process.env.NODE_ENV === 'production' ? {
       ssl: {
         require: true,
         rejectUnauthorized: false
       }
-    }
-  },
-  test: {
-    username: 'postgres',
-    password: 'postgres',
-    database: 'aixandria_test',
-    host: 'localhost',
-    port: 5432,
-    dialect: 'postgres',
-    logging: false
+    } : {}
+  }
+);
+
+// Test database connection
+const testConnection = async () => {
+  try {
+    await sequelize.authenticate();
+    console.log('✅ Database connection established successfully.');
+  } catch (error) {
+    console.error('❌ Unable to connect to the database:', error);
+    process.exit(1);
   }
 };
 
-module.exports = config;
-const env = process.env.NODE_ENV || 'development';
-module.exports = config[env];
+testConnection();
+
+module.exports = sequelize;
