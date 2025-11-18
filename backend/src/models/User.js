@@ -1,61 +1,69 @@
-module.exports = (sequelize, DataTypes) => {
-  const User = sequelize.define('User', {
-    id: {
-      type: DataTypes.UUID,
-      defaultValue: DataTypes.UUIDV4,
-      primaryKey: true
-    },
-    wallet_address: {
-      type: DataTypes.STRING(42),
-      allowNull: false,
-      unique: true,
-      validate: {
-        is: /^0x[a-fA-F0-9]{40}$/
-      }
-    },
-    username: {
-      type: DataTypes.STRING(50),
-      unique: true,
-      validate: {
-        len: [3, 50],
-        isAlphanumeric: true
-      }
-    },
-    email: {
-      type: DataTypes.STRING(255),
-      validate: {
-        isEmail: true
-      }
-    },
-    last_login: {
-      type: DataTypes.DATE
-    },
-    total_revenue: {
-      type: DataTypes.DECIMAL(18, 4),
-      defaultValue: 0.0
-    },
-    created_at: {
-      type: DataTypes.DATE,
-      defaultValue: DataTypes.NOW
-    },
-    updated_at: {
-      type: DataTypes.DATE,
-      defaultValue: DataTypes.NOW
-    }
-  }, {
-    tableName: 'users',
-    timestamps: false,
-    indexes: [
-      {
-        unique: true,
-        fields: ['wallet_address']
-      },
-      {
-        unique: true,
-        fields: ['username']
-      }
-    ]
-  });
+const { DataTypes } = require('sequelize');
+const sequelize = require('../config/database');
 
-  return User;
-};
+const User = sequelize.define('User', {
+  id: {
+    type: DataTypes.UUID,
+    defaultValue: DataTypes.UUIDV4,
+    primaryKey: true
+  },
+  wallet_address: {
+    type: DataTypes.STRING(42),
+    allowNull: false,
+    unique: true,
+    validate: {
+      isEthereumAddress: true
+    }
+  },
+  username: {
+    type: DataTypes.STRING(50),
+    allowNull: true
+  },
+  email: {
+    type: DataTypes.STRING(100),
+    allowNull: true,
+    validate: {
+      isEmail: true
+    }
+  },
+  total_earnings: {
+    type: DataTypes.DECIMAL(15, 6),
+    defaultValue: 0
+  },
+  total_spent: {
+    type: DataTypes.DECIMAL(15, 6),
+    defaultValue: 0
+  },
+  persona_count: {
+    type: DataTypes.INTEGER,
+    defaultValue: 0
+  },
+  battle_participations: {
+    type: DataTypes.INTEGER,
+    defaultValue: 0
+  },
+  reputation_score: {
+    type: DataTypes.DECIMAL(4, 2),
+    defaultValue: 0
+  },
+  last_active: {
+    type: DataTypes.DATE,
+    defaultValue: DataTypes.NOW
+  },
+  created_date: {
+    type: DataTypes.DATE,
+    defaultValue: DataTypes.NOW
+  }
+}, {
+  tableName: 'users',
+  indexes: [
+    {
+      fields: ['wallet_address']
+    },
+    {
+      fields: ['reputation_score']
+    }
+  ]
+});
+
+module.exports = User;
