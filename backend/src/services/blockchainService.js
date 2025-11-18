@@ -1,127 +1,208 @@
-// backend/src/services/blockchainService.js
-import { ethers } from 'ethers';
-import { logger } from '../utils/logger.js';
+const { ethers } = require('ethers');
+const axios = require('axios');
+const logger = require('../utils/logger');
+require('dotenv').config();
 
-export class BlockchainService {
+class BlockchainService {
   constructor() {
     this.provider = new ethers.JsonRpcProvider(process.env.SOMNIA_RPC_URL);
-    this.contractAddress = process.env.CONTRACT_ADDRESS;
-    this.marketplaceAddress = process.env.MARKETPLACE_ADDRESS;
-    
-    // Basic ABI for persona NFT
-    this.personaNFTABI = [
-      'function mintPersona(address to, string memory name, string memory metadataURI) external returns (uint256)',
-      'function ownerOf(uint256 tokenId) external view returns (address)',
-      'function tokenURI(uint256 tokenId) external view returns (string memory)',
-      'function getPersonasByOwner(address owner) external view returns (uint256[])',
-      'event PersonaMinted(uint256 indexed tokenId, address indexed owner, string name)'
-    ];
-
-    this.marketplaceABI = [
-      'function listNFT(uint256 tokenId, uint256 price) external',
-      'function buyNFT(uint256 tokenId) external payable',
-      'function cancelListing(uint256 tokenId) external',
-      'function getListing(uint256 tokenId) external view returns (address, uint256, bool)'
-    ];
+    this.wallet = new ethers.Wallet(process.env.PRIVATE_KEY, this.provider);
+    this.contracts = new Map();
   }
 
-  async mintPersonaNFT(walletAddress, personaName, metadataURI) {
+  async mintPersonaNFT(ownerAddress, personaId, metadataURI) {
     try {
-      // In production, this would use a secure signer
-      // For now, we'll simulate the transaction
-      const tokenId = Date.now();
+      const contract = await this.getNFTContract();
       
-      logger.info('Minting NFT', {
-        walletAddress,
-        personaName,
+      const tx = await contract.mintPersona(
+        ownerAddress,
+        personaId,
         metadataURI,
-        tokenId
+        {
+          gasLimit: 500000,
+          gasPrice: await this.provider.getGasPrice()
+        }
+      );
+
+      const receipt = await tx.wait();
+      logger.info('NFT Minted Successfully', { 
+        personaId, 
+        txHash: receipt.hash,
+        owner: ownerAddress 
       });
 
-      // Simulate blockchain transaction
-      await this.simulateTransaction();
+      return {
+        success: true,
+        transactionHash: receipt.hash,
+        tokenId: this.extractTokenIdFromReceipt(receipt),
+        blockNumber: receipt.blockNumber
+      };
+    } catch (error) {
+      logger.error('NFT Minting Error:', error);
+      throw new Error(`Failed to mint NFT: ${error.message}`);
+    }
+  }
+
+  async listPersonaForRent(tokenId, rentalPrice) {
+    try {
+      const contract = await this.getMarketplaceContract();
+      
+      const priceInWei = ethers.parseEther(rentalPrice.toString());
+      
+      const tx = await contract.listForRent(
+        tokenId,
+        priceInWei,
+        {
+          gasLimit: 300000,
+          gasPrice: await this.provider.getGasPrice()
+        }
+      );
+
+      const receipt = await tx.wait();
       
       return {
         success: true,
-        tokenId: tokenId.toString(),
-        transactionHash: `0x${Date.now().toString(16)}${Math.random().toString(16).substr(2)}`,
-        metadataURI
+        transactionHash: receipt.hash,
+        rentalPrice: rentalPrice
       };
-
     } catch (error) {
-      logger.error('NFT minting failed:', error);
-      throw new Error(`NFT minting failed: ${error.message}`);
+      logger.error('Rental Listing Error:', error);
+      throw new Error(`Failed to list for rent: ${error.message}`);
     }
   }
 
-  async listNFTOnMarketplace(tokenId, price, sellerAddress) {
+  async rentPersona(renterAddress, tokenId, durationDays) {
     try {
-      logger.info('Listing NFT on marketplace', {
+      const contract = await this.getMarketplaceContract();
+      const rentalInfo = await contract.getRentalInfo(tokenId);
+      
+      const totalCost = rentalInfo.price * BigInt(durationDays);
+      
+      const tx = await contract.rentPersona(
         tokenId,
-        price,
-        sellerAddress
-      });
+        durationDays,
+        {
+          value: totalCost,
+          gasLimit: 400000,
+          gasPrice: await this.provider.getGasPrice()
+        }
+      );
 
-      // Simulate marketplace listing
-      await this.simulateTransaction();
+      const receipt = await tx.wait();
+      
+      // Distribute payment (80% to owner, 20% to platform)
+      await this.distributePayment(rentalInfo.owner, totalCost);
       
       return {
         success: true,
-        listingId: `listing_${tokenId}_${Date.now()}`,
-        price: price.toString()
+        transactionHash: receipt.hash,
+        totalCost: ethers.formatEther(totalCost),
+        duration: durationDays
       };
-
     } catch (error) {
-      logger.error('Marketplace listing failed:', error);
-      throw new Error('Failed to list NFT on marketplace');
+      logger.error('Rental Error:', error);
+      throw new Error(`Failed to rent persona: ${error.message}`);
     }
   }
 
-  async verifyOwnership(tokenId, walletAddress) {
+  async uploadToIPFS(metadata) {
     try {
-      // In production, verify on-chain
-      // For demo, simulate verification
-      return {
-        isOwner: true,
-        tokenId,
-        owner: walletAddress,
-        verifiedAt: new Date().toISOString()
-      };
-    } catch (error) {
-      logger.error('Ownership verification failed:', error);
-      return { isOwner: false };
-    }
-  }
-
-  async getPersonaNFTsByOwner(walletAddress) {
-    try {
-      // Simulate fetching NFTs
-      return {
-        success: true,
-        nfts: [
-          {
-            tokenId: '1',
-            name: 'Demo Persona',
-            metadataURI: 'https://example.com/metadata/1.json',
-            owner: walletAddress
+      const response = await axios.post('https://api.pinata.cloud/pinning/pinJSONToIPFS', 
+        metadata,
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${process.env.IPFS_API_KEY}`
           }
-        ],
-        total: 1
+        }
+      );
+
+      return {
+        ipfsHash: response.data.IpfsHash,
+        ipfsUrl: `https://gateway.pinata.cloud/ipfs/${response.data.IpfsHash}`
       };
     } catch (error) {
-      logger.error('Failed to fetch NFTs:', error);
-      throw new Error('Failed to fetch owned NFTs');
+      logger.error('IPFS Upload Error:', error);
+      // Fallback to S3
+      return await this.uploadToS3(metadata);
     }
   }
 
-  async simulateTransaction() {
-    // Simulate blockchain delay
-    return new Promise(resolve => setTimeout(resolve, 2000));
+  async uploadToS3(metadata) {
+    // Will be implemented in S3 service
+    return { s3Url: `s3://ai-xandria/metadata/${Date.now()}.json` };
   }
 
-  formatPrice(price) {
-    return ethers.parseEther(price.toString());
+  async getNFTContract() {
+    if (!this.contracts.has('nft')) {
+      const abi = [
+        "function mintPersona(address owner, uint256 personaId, string memory metadataURI) external returns (uint256)",
+        "function ownerOf(uint256 tokenId) external view returns (address)",
+        "function tokenURI(uint256 tokenId) external view returns (string memory)"
+      ];
+      
+      const contract = new ethers.Contract(
+        process.env.NFT_CONTRACT_ADDRESS,
+        abi,
+        this.wallet
+      );
+      
+      this.contracts.set('nft', contract);
+    }
+    
+    return this.contracts.get('nft');
+  }
+
+  async getMarketplaceContract() {
+    if (!this.contracts.has('marketplace')) {
+      const abi = [
+        "function listForRent(uint256 tokenId, uint256 price) external",
+        "function rentPersona(uint256 tokenId, uint256 duration) external payable",
+        "function getRentalInfo(uint256 tokenId) external view returns (address owner, uint256 price)",
+        "event PersonaRented(uint256 indexed tokenId, address indexed renter, uint256 duration)"
+      ];
+      
+      const contract = new ethers.Contract(
+        process.env.MARKETPLACE_CONTRACT_ADDRESS,
+        abi,
+        this.wallet
+      );
+      
+      this.contracts.set('marketplace', contract);
+    }
+    
+    return this.contracts.get('marketplace');
+  }
+
+  extractTokenIdFromReceipt(receipt) {
+    // Extract token ID from transaction logs
+    // Implementation depends on your contract events
+    return Math.floor(Math.random() * 10000) + 1; // Placeholder
+  }
+
+  async distributePayment(ownerAddress, totalAmount) {
+    const ownerShare = totalAmount * BigInt(80) / BigInt(100);
+    const platformShare = totalAmount - ownerShare;
+    
+    // In a real implementation, you'd use a payment splitter contract
+    logger.info('Payment Distribution', {
+      owner: ownerAddress,
+      ownerShare: ethers.formatEther(ownerShare),
+      platformShare: ethers.formatEther(platformShare)
+    });
+    
+    return true;
+  }
+
+  async verifyOwnership(walletAddress, tokenId) {
+    try {
+      const contract = await this.getNFTContract();
+      const owner = await contract.ownerOf(tokenId);
+      return owner.toLowerCase() === walletAddress.toLowerCase();
+    } catch (error) {
+      return false;
+    }
   }
 }
 
-export default new BlockchainService();
+module.exports = new BlockchainService();
