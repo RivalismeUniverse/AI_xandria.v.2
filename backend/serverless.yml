@@ -1,71 +1,51 @@
 service: ai-xandria-backend
 
-frameworkVersion: '3'
-
 provider:
   name: aws
   runtime: nodejs18.x
   region: us-east-1
   stage: ${opt:stage, 'dev'}
-  timeout: 30
-  memorySize: 512
   environment:
     NODE_ENV: ${self:provider.stage}
+    AWS_REGION: ${self:provider.region}
     BEDROCK_REGION: us-east-1
     RDS_HOST: ${env:RDS_HOST}
-    RDS_PORT: ${env:RDS_PORT, '5432'}
-    RDS_DATABASE: ${env:RDS_DATABASE}
     RDS_USERNAME: ${env:RDS_USERNAME}
     RDS_PASSWORD: ${env:RDS_PASSWORD}
-    S3_BUCKET: ${env:S3_BUCKET}
+    RDS_DATABASE: ${env:RDS_DATABASE}
     JWT_SECRET: ${env:JWT_SECRET}
-    BLOCKCHAIN_RPC: ${env:BLOCKCHAIN_RPC}
-    CONTRACT_ADDRESS: ${env:CONTRACT_ADDRESS}
+    SOMNIA_RPC_URL: ${env:SOMNIA_RPC_URL}
+    NFT_CONTRACT_ADDRESS: ${env:NFT_CONTRACT_ADDRESS}
+    IPFS_API_KEY: ${env:IPFS_API_KEY}
+  
+  iamRoleStatements:
+    - Effect: Allow
+      Action:
+        - bedrock:InvokeModel
+        - bedrock:ListFoundationModels
+      Resource: "*"
+    - Effect: Allow
+      Action:
+        - s3:PutObject
+        - s3:GetObject
+        - s3:DeleteObject
+      Resource: "arn:aws:s3:::ai-xandria-${self:provider.stage}/*"
+    - Effect: Allow
+      Action:
+        - transcribe:StartStreamTranscription
+        - transcribe:StartTranscriptionJob
+      Resource: "*"
 
-  iam:
-    role:
-      statements:
-        - Effect: Allow
-          Action:
-            - bedrock:InvokeModel
-            - bedrock:InvokeModelWithResponseStream
-          Resource: "*"
-        - Effect: Allow
-          Action:
-            - s3:GetObject
-            - s3:PutObject
-            - s3:DeleteObject
-          Resource: "arn:aws:s3:::${env:S3_BUCKET}/*"
-        - Effect: Allow
-          Action:
-            - logs:CreateLogGroup
-            - logs:CreateLogStream
-            - logs:PutLogEvents
-          Resource: "*"
-        - Effect: Allow
-          Action:
-            - rds-db:connect
-          Resource: "*"
+plugins:
+  - serverless-offline
 
 functions:
   api:
     handler: src/lambda.handler
+    timeout: 30
+    memorySize: 512
     events:
-      - httpApi:
-          path: /{proxy+}
-          method: ANY
-      - httpApi:
-          path: /
-          method: ANY
-    vpc:
-      securityGroupIds:
-        - ${env:VPC_SECURITY_GROUP_ID}
-      subnetIds:
-        - ${env:VPC_SUBNET_ID_1}
-        - ${env:VPC_SUBNET_ID_2}
-
-plugins:
-  - serverless-offline
+      - httpApi: "*"
 
 custom:
   serverless-offline:
