@@ -1,119 +1,102 @@
-module.exports = (sequelize, DataTypes) => {
-  const Persona = sequelize.define('Persona', {
-    id: {
-      type: DataTypes.UUID,
-      defaultValue: DataTypes.UUIDV4,
-      primaryKey: true
-    },
-    creator_id: {
-      type: DataTypes.UUID,
-      allowNull: false,
-      references: {
-        model: 'users',
-        key: 'id'
-      }
-    },
-    name: {
-      type: DataTypes.STRING(100),
-      allowNull: false,
-      validate: {
-        len: [1, 100]
-      }
-    },
-    description: {
-      type: DataTypes.TEXT
-    },
-    personality: {
-      type: DataTypes.TEXT,
-      allowNull: false
-    },
-    expertise: {
-      type: DataTypes.JSONB,
-      defaultValue: []
-    },
-    intelligence: {
-      type: DataTypes.INTEGER,
-      defaultValue: 50,
-      validate: {
-        min: 0,
-        max: 100
-      }
-    },
-    creativity: {
-      type: DataTypes.INTEGER,
-      defaultValue: 50,
-      validate: {
-        min: 0,
-        max: 100
-      }
-    },
-    persuasiveness: {
-      type: DataTypes.INTEGER,
-      defaultValue: 50,
-      validate: {
-        min: 0,
-        max: 100
-      }
-    },
-    avatar_url: {
-      type: DataTypes.TEXT
-    },
-    nft_token_id: {
-      type: DataTypes.INTEGER
-    },
-    nft_contract_address: {
-      type: DataTypes.STRING(42),
-      validate: {
-        is: /^0x[a-fA-F0-9]{40}$/
-      }
-    },
-    is_minted: {
-      type: DataTypes.BOOLEAN,
-      defaultValue: false
-    },
-    total_battles: {
-      type: DataTypes.INTEGER,
-      defaultValue: 0
-    },
-    total_wins: {
-      type: DataTypes.INTEGER,
-      defaultValue: 0
-    },
-    total_chats: {
-      type: DataTypes.INTEGER,
-      defaultValue: 0
-    },
-    elo_rating: {
-      type: DataTypes.INTEGER,
-      defaultValue: 1200
-    },
-    revenue_earned: {
-      type: DataTypes.DECIMAL(18, 4),
-      defaultValue: 0.0
-    },
-    created_at: {
-      type: DataTypes.DATE,
-      defaultValue: DataTypes.NOW
-    },
-    updated_at: {
-      type: DataTypes.DATE,
-      defaultValue: DataTypes.NOW
-    }
-  }, {
-    tableName: 'personas',
-    timestamps: false,
-    indexes: [
-      {
-        fields: ['creator_id']
-      },
-      {
-        fields: ['elo_rating']
-      },
-      {
-        fields: ['is_minted']
-      }
-    ]
-  });
+const { DataTypes } = require('sequelize');
+const sequelize = require('../config/database');
 
-  return Persona;
-};
+const Persona = sequelize.define('Persona', {
+  id: {
+    type: DataTypes.UUID,
+    defaultValue: DataTypes.UUIDV4,
+    primaryKey: true
+  },
+  owner_address: {
+    type: DataTypes.STRING(42),
+    allowNull: false,
+    validate: {
+      isEthereumAddress: true
+    }
+  },
+  name: {
+    type: DataTypes.STRING(100),
+    allowNull: false
+  },
+  description: {
+    type: DataTypes.TEXT,
+    allowNull: true
+  },
+  prompt_text: {
+    type: DataTypes.TEXT,
+    allowNull: false
+  },
+  traits: {
+    type: DataTypes.JSONB,
+    defaultValue: {
+      intelligence: 50,
+      creativity: 50,
+      persuasiveness: 50,
+      knowledge: 50,
+      humor: 50
+    }
+  },
+  personality: {
+    type: DataTypes.TEXT,
+    allowNull: true
+  },
+  expertise: {
+    type: DataTypes.ARRAY(DataTypes.STRING),
+    defaultValue: []
+  },
+  ipfs_hash: {
+    type: DataTypes.STRING(100),
+    allowNull: true
+  },
+  token_id: {
+    type: DataTypes.INTEGER,
+    allowNull: true
+  },
+  contract_address: {
+    type: DataTypes.STRING(42),
+    allowNull: true
+  },
+  is_rentable: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false
+  },
+  rental_price: {
+    type: DataTypes.DECIMAL(10, 6),
+    defaultValue: 0
+  },
+  battle_wins: {
+    type: DataTypes.INTEGER,
+    defaultValue: 0
+  },
+  battle_losses: {
+    type: DataTypes.INTEGER,
+    defaultValue: 0
+  },
+  rating: {
+    type: DataTypes.DECIMAL(3, 1),
+    defaultValue: 5.0
+  },
+  created_date: {
+    type: DataTypes.DATE,
+    defaultValue: DataTypes.NOW
+  },
+  is_active: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: true
+  }
+}, {
+  tableName: 'personas',
+  indexes: [
+    {
+      fields: ['owner_address']
+    },
+    {
+      fields: ['token_id']
+    },
+    {
+      fields: ['rating']
+    }
+  ]
+});
+
+module.exports = Persona;
