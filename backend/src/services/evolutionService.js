@@ -1,171 +1,165 @@
-const { Persona, EvolutionLog } = require('../models');
 const logger = require('../utils/logger');
 
-/**
- * Evolution Service
- * Handles AI persona trait evolution based on battle performance
- */
 class EvolutionService {
-  
-  /**
-   * Evolve personas after battle completion
-   */
-  async evolveBattlePersonas(battle) {
+  constructor() {
+    this.evolutionWeights = {
+      battle_win: 1.5,
+      battle_loss: -0.8,
+      user_rating: 0.1,
+      chat_engagement: 0.05,
+      rental_usage: 0.2
+    };
+  }
+
+  calculateNewTraits(currentTraits, performanceData) {
     try {
-      const winner = await Persona.findByPk(battle.winner_id);
-      const loserId = battle.winner_id === battle.persona1_id 
-        ? battle.persona2_id 
-        : battle.persona1_id;
-      const loser = await Persona.findByPk(loserId);
+      const newTraits = { ...currentTraits };
+      let totalEvolution = 0;
 
-      const winMargin = Math.abs(battle.persona1_votes - battle.persona2_votes);
-      const totalVotes = battle.persona1_votes + battle.persona2_votes;
-      const marginPercent = totalVotes > 0 ? (winMargin / totalVotes) * 100 : 0;
-
-      // Evolve winner
-      await this.evolveWinner(winner, marginPercent, battle.id);
-
-      // Evolve loser
-      await this.evolveLoser(loser, marginPercent, battle.id);
-
-      // Update ELO ratings
-      await this.updateEloRatings(winner, loser, marginPercent);
-
-      logger.info('Battle personas evolved', {
-        battleId: battle.id,
-        winnerId: winner.id,
-        loserId: loser.id,
-        marginPercent
-      });
-
-    } catch (error) {
-      logger.error('Evolution failed', { battleId: battle.id, error });
-      throw error;
-    }
-  }
-
-  /**
-   * Evolve winner traits (positive adjustments)
-   */
-  async evolveWinner(persona, marginPercent, battleId) {
-    // Base evolution points (1-5 based on margin)
-    const evolutionPoints = Math.ceil(marginPercent / 20);
-
-    const changes = {
-      persuasiveness: Math.min(3, evolutionPoints), // Winning = better persuasion
-      intelligence: Math.min(2, Math.floor(evolutionPoints / 2)),
-      creativity: Math.min(1, Math.floor(evolutionPoints / 3))
-    };
-
-    await this.applyTraitChanges(persona, changes, battleId, 'victory');
-  }
-
-  /**
-   * Evolve loser traits (adaptive adjustments)
-   */
-  async evolveLoser(persona, marginPercent, battleId) {
-    // Losers adapt by learning
-    const evolutionPoints = Math.ceil(marginPercent / 30);
-
-    const changes = {
-      intelligence: Math.min(2, evolutionPoints), // Learn from mistakes
-      creativity: Math.min(2, evolutionPoints), // Try new approaches
-      persuasiveness: -Math.min(1, Math.floor(evolutionPoints / 2)) // Lost persuasion
-    };
-
-    await this.applyTraitChanges(persona, changes, battleId, 'defeat');
-  }
-
-  /**
-   * Apply trait changes to persona
-   */
-  async applyTraitChanges(persona, changes, battleId, reason) {
-    const updates = {};
-
-    for (const [trait, change] of Object.entries(changes)) {
-      const currentValue = persona[trait];
-      const newValue = Math.max(0, Math.min(100, currentValue + change));
-
-      if (newValue !== currentValue) {
-        updates[trait] = newValue;
-
-        // Log evolution
-        await EvolutionLog.create({
-          persona_id: persona.id,
-          battle_id: battleId,
-          trait_changed: trait,
-          old_value: currentValue,
-          new_value: newValue,
-          reason: `${reason}: ${change > 0 ? '+' : ''}${change} points`
+      // Battle performance impact
+      if (performanceData.battleResults) {
+        performanceData.battleResults.forEach(result => {
+          const impact = result.won ? 
+            this.evolutionWeights.battle_win : 
+            this.evolutionWeights.battle_loss;
+          
+          this.applyTraitEvolution(newTraits, 'intelligence', impact * 0.7);
+          this.applyTraitEvolution(newTraits, 'persuasiveness', impact * 1.2);
+          this.applyTraitEvolution(newTraits, 'creativity', impact * 0.9);
+          
+          totalEvolution += Math.abs(impact);
         });
       }
-    }
 
-    if (Object.keys(updates).length > 0) {
-      await persona.update(updates);
-      logger.info('Traits evolved', {
-        personaId: persona.id,
-        changes: updates
+      // User rating impact
+      if (performanceData.averageRating) {
+        const ratingImpact = (performanceData.averageRating - 3) * this.evolutionWeights.user_rating;
+        this.applyTraitEvolution(newTraits, 'knowledge', ratingImpact * 0.8);
+        this.applyTraitEvolution(newTraits, 'humor', ratingImpact * 0.5);
+      }
+
+      // Chat engagement impact
+      if (performanceData.chatSessions > 10) {
+        const engagementImpact = Math.log(performanceData.chatSessions) * this.evolutionWeights.chat_engagement;
+        this.applyTraitEvolution(newTraits, 'intelligence', engagementImpact);
+        this.applyTraitEvolution(newTraits, 'creativity', engagementImpact * 0.6);
+      }
+
+      // Rental usage impact
+      if (performanceData.rentalCount > 0) {
+        const rentalImpact = performanceData.rentalCount * this.evolutionWeights.rental_usage;
+        this.applyTraitEvolution(newTraits, 'persuasiveness', rentalImpact);
+        this.applyTraitEvolution(newTraits, 'knowledge', rentalImpact * 0.8);
+      }
+
+      // Ensure traits stay within bounds
+      this.normalizeTraits(newTraits);
+
+      logger.info('Trait Evolution Calculated', {
+        personaId: performanceData.personaId,
+        oldTraits: currentTraits,
+        newTraits,
+        totalEvolution
       });
+
+      return newTraits;
+    } catch (error) {
+      logger.error('Trait Evolution Error:', error);
+      return currentTraits; // Return original traits if calculation fails
     }
   }
 
-  /**
-   * Update ELO ratings based on battle outcome
-   */
-  async updateEloRatings(winner, loser, marginPercent) {
-    const K = 32; // K-factor for ELO calculation
-
-    const winnerElo = winner.elo_rating || 1200;
-    const loserElo = loser.elo_rating || 1200;
-
-    // Expected scores
-    const expectedWinner = 1 / (1 + Math.pow(10, (loserElo - winnerElo) / 400));
-    const expectedLoser = 1 - expectedWinner;
-
-    // Actual scores (1 for win, 0 for loss)
-    const actualWinner = 1;
-    const actualLoser = 0;
-
-    // New ratings
-    const newWinnerElo = Math.round(winnerElo + K * (actualWinner - expectedWinner));
-    const newLoserElo = Math.round(loserElo + K * (actualLoser - expectedLoser));
-
-    await winner.update({ elo_rating: newWinnerElo });
-    await loser.update({ elo_rating: newLoserElo });
-
-    logger.info('ELO ratings updated', {
-      winner: { id: winner.id, old: winnerElo, new: newWinnerElo },
-      loser: { id: loser.id, old: loserElo, new: newLoserElo }
-    });
-  }
-
-  /**
-   * Get evolution history for persona
-   */
-  async getEvolutionHistory(personaId, limit = 20) {
-    return await EvolutionLog.findAll({
-      where: { persona_id: personaId },
-      limit,
-      order: [['created_at', 'DESC']],
-      include: ['battle']
-    });
-  }
-
-  /**
-   * Calculate evolution score (how much persona has evolved)
-   */
-  async calculateEvolutionScore(personaId) {
-    const logs = await EvolutionLog.findAll({
-      where: { persona_id: personaId }
-    });
-
-    let totalChange = 0;
-    for (const log of logs) {
-      totalChange += Math.abs(log.new_value - log.old_value);
+  applyTraitEvolution(traits, traitName, impact) {
+    if (traits[traitName] !== undefined) {
+      traits[traitName] = Math.max(0, Math.min(100, traits[traitName] + impact));
     }
+  }
 
-    return totalChange;
+  normalizeTraits(traits) {
+    Object.keys(traits).forEach(trait => {
+      traits[trait] = Math.max(0, Math.min(100, Math.round(traits[trait] * 10) / 10));
+    });
+  }
+
+  calculateBattleRating(persona, opponent, battleResult) {
+    const kFactor = 32;
+    const expectedScore = 1 / (1 + Math.pow(10, (opponent.rating - persona.rating) / 400));
+    
+    const actualScore = battleResult.won ? 1 : 0;
+    const ratingChange = kFactor * (actualScore - expectedScore);
+    
+    const newRating = Math.max(0, persona.rating + ratingChange);
+    
+    logger.info('Rating Updated', {
+      personaId: persona.id,
+      oldRating: persona.rating,
+      newRating,
+      change: ratingChange,
+      opponentRating: opponent.rating
+    });
+
+    return newRating;
+  }
+
+  shouldEvolveToNFT(persona, performanceData) {
+    // Criteria for automatic NFT minting
+    const criteria = {
+      minBattles: 5,
+      minRating: 4.0,
+      minWinRate: 0.6,
+      minChatSessions: 20
+    };
+
+    const winRate = performanceData.battleWins / Math.max(1, performanceData.battleWins + performanceData.battleLosses);
+    
+    return (
+      performanceData.battleWins + performanceData.battleLosses >= criteria.minBattles &&
+      persona.rating >= criteria.minRating &&
+      winRate >= criteria.minWinRate &&
+      performanceData.chatSessions >= criteria.minChatSessions
+    );
+  }
+
+  generateEvolutionReport(persona, oldTraits, newTraits, performanceData) {
+    const changes = {};
+    Object.keys(newTraits).forEach(trait => {
+      changes[trait] = {
+        old: oldTraits[trait],
+        new: newTraits[trait],
+        change: (newTraits[trait] - oldTraits[trait]).toFixed(2)
+      };
+    });
+
+    return {
+      personaId: persona.id,
+      evolutionDate: new Date().toISOString(),
+      performanceSummary: {
+        battles: performanceData.battleWins + performanceData.battleLosses,
+        winRate: (performanceData.battleWins / Math.max(1, performanceData.battleWins + performanceData.battleLosses)).toFixed(2),
+        averageRating: performanceData.averageRating,
+        chatSessions: performanceData.chatSessions
+      },
+      traitChanges: changes,
+      recommendedActions: this.getRecommendedActions(newTraits, performanceData)
+    };
+  }
+
+  getRecommendedActions(traits, performanceData) {
+    const actions = [];
+    
+    if (traits.persuasiveness < 60 && performanceData.battleLosses > performanceData.battleWins) {
+      actions.push('Focus on persuasive argument training');
+    }
+    
+    if (traits.creativity < 50) {
+      actions.push('Engage in creative thinking exercises');
+    }
+    
+    if (traits.knowledge < 70) {
+      actions.push('Expand knowledge base in specialized domains');
+    }
+    
+    return actions;
   }
 }
 
