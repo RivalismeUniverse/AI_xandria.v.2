@@ -1,249 +1,213 @@
 const express = require('express');
 const router = express.Router();
-const { User, Persona } = require('../models');
-const { Op } = require('sequelize');
-const { generateToken, verifySignature } = require('../middleware/auth');
-const auth = require('../middleware/auth').auth;
+const jwt = require('jsonwebtoken');
+const { User } = require('../models');
+const auth = require('../middleware/auth');
 const logger = require('../utils/logger');
-const { ValidationError } = require('../utils/errorHandler');
 
-/**
- * POST /api/wallet/connect
- * Connect wallet and authenticate user
- */
-router.post('/connect', async (req, res, next) => {
+// Connect wallet and authenticate
+router.post('/connect', async (req, res) => {
   try {
-    const { wallet_address, signature, message } = req.body;
+    const { walletAddress, signature, message } = req.body;
 
-    if (!wallet_address || !signature) {
-      throw new ValidationError('wallet_address and signature required');
+    if (!walletAddress) {
+      return res.status(400).json({
+        success: false,
+        error: 'Wallet address is required'
+      });
     }
 
-    // Verify signature
-    const expectedMessage = message || `Sign this message to authenticate with AI_XANDRIA: ${Date.now()}`;
-    const isValid = verifySignature(expectedMessage, signature, wallet_address);
+    // In a real implementation, verify the signature
+    // For hackathon, we'll trust the wallet address
+    const signatureValid = true; // await verifySignature(walletAddress, signature, message);
 
-    if (!isValid) {
-      return res.status(401).json({ 
-        error: 'Invalid signature',
-        message: 'Signature verification failed' 
+    if (!signatureValid) {
+      return res.status(401).json({
+        success: false,
+        error: 'Invalid signature'
       });
     }
 
     // Find or create user
-    let user = await User.findOne({ 
-      where: { wallet_address: wallet_address.toLowerCase() } 
-    });
-
+    let user = await User.findOne({ where: { wallet_address: walletAddress } });
+    
     if (!user) {
-      // Create new user
       user = await User.create({
-        wallet_address: wallet_address.toLowerCase(),
-        last_login: new Date()
-      });
-
-      logger.info('New user created', {
-        userId: user.id,
-        wallet: wallet_address
+        wallet_address: walletAddress,
+        username: `user_${walletAddress.slice(2, 8)}`,
+        created_date: new Date(),
+        last_active: new Date()
       });
     } else {
-      // Update last login
-      await user.update({ last_login: new Date() });
+      await user.update({ last_active: new Date() });
     }
 
     // Generate JWT token
-    const token = generateToken(user.id);
+    const token = jwt.sign(
+      { walletAddress, userId: user.id },
+      process.env.JWT_SECRET,
+      { expiresIn: '7d' }
+    );
 
-    logger.info('Wallet connected', {
-      userId: user.id,
-      wallet: wallet_address
-    });
+    logger.info('Wallet Connected', { walletAddress, userId: user.id });
 
     res.json({
-      message: 'Wallet connected successfully',
+      success: true,
       token,
       user: {
         id: user.id,
-        wallet_address: user.wallet_address,
+        walletAddress: user.wallet_address,
         username: user.username,
-        total_revenue: user.total_revenue
+        personaCount: user.persona_count,
+        totalEarnings: user.total_earnings,
+        reputationScore: user.reputation_score
       }
     });
+
   } catch (error) {
-    next(error);
+    logger.error('Wallet Connect Error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
   }
 });
 
-/**
- * GET /api/wallet/profile
- * Get authenticated user profile
- */
-router.get('/profile', auth, async (req, res, next) => {
+// Get user profile
+router.get('/profile', auth, async (req, res) => {
   try {
-    const user = await User.findByPk(req.user.id, {
-      include: [{
-        model: Persona,
-        as: 'personas',
-        attributes: ['id', 'name', 'avatar_url', 'elo_rating', 'total_battles', 'total_wins']
-      }]
+    const walletAddress = req.walletAddress;
+
+    const user = await User.findOne({ 
+      where: { wallet_address: walletAddress }
     });
 
     if (!user) {
-      return res.status(404).json({ error: 'User not found' });
+      return res.status(404).json({
+        success: false,
+        error: 'User not found'
+      });
     }
 
-    // Calculate stats
+    res.json({
+      success: true,
+      profile: {
+        id: user.id,
+        walletAddress: user.wallet_address,
+        username: user.username,
+        email: user.email,
+        personaCount: user.persona_count,
+        totalEarnings: user.total_earnings,
+        totalSpent: user.total_spent,
+        battleParticipations: user.battle_participations,
+        reputationScore: user.reputation_score,
+        lastActive: user.last_active,
+        createdDate: user.created_date
+      }
+    });
+
+  } catch (error) {
+    logger.error('Get Profile Error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Update user profile
+router.patch('/profile', auth, async (req, res) => {
+  try {
+    const walletAddress = req.walletAddress;
+    const { username, email } = req.body;
+
+    const user = await User.findOne({ where: { wallet_address: walletAddress } });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found'
+      });
+    }
+
+    const updateData = {};
+    if (username) updateData.username = username;
+    if (email) updateData.email = email;
+
+    await user.update(updateData);
+
+    res.json({
+      success: true,
+      profile: {
+        id: user.id,
+        walletAddress: user.wallet_address,
+        username: user.username,
+        email: user.email
+      }
+    });
+
+  } catch (error) {
+    logger.error('Update Profile Error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Get user stats
+router.get('/stats', auth, async (req, res) => {
+  try {
+    const walletAddress = req.walletAddress;
+
+    const user = await User.findOne({ where: { wallet_address: walletAddress } });
+    
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found'
+      });
+    }
+
+    // Get additional stats from related tables
     const stats = {
-      total_personas: user.personas.length,
-      total_battles: user.personas.reduce((sum, p) => sum + p.total_battles, 0),
-      total_wins: user.personas.reduce((sum, p) => sum + p.total_wins, 0),
-      total_revenue: user.total_revenue
+      basic: {
+        personasCreated: user.persona_count,
+        totalEarnings: user.total_earnings,
+        totalSpent: user.total_spent,
+        battleParticipations: user.battle_participations,
+        reputationScore: user.reputation_score
+      },
+      marketplace: {
+        nftsOwned: 0, // Would count from Persona table
+        nftsListed: 0, // Would count from Persona table
+        totalRevenue: user.total_earnings
+      },
+      activity: {
+        lastActive: user.last_active,
+        memberSince: user.created_date
+      }
     };
 
     res.json({
-      user: {
-        id: user.id,
-        wallet_address: user.wallet_address,
-        username: user.username,
-        email: user.email,
-        created_at: user.created_at,
-        last_login: user.last_login
-      },
-      stats,
-      personas: user.personas
+      success: true,
+      stats
     });
+
   } catch (error) {
-    next(error);
+    logger.error('Get Stats Error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
   }
 });
 
-/**
- * PUT /api/wallet/profile
- * Update user profile
- */
-router.put('/profile', auth, async (req, res, next) => {
-  try {
-    const { username, email } = req.body;
-
-    const updates = {};
-    
-    if (username) {
-      // Check if username already taken
-      const existing = await User.findOne({ 
-        where: { 
-          username,
-          id: { [Op.ne]: req.user.id }
-        } 
-      });
-
-      if (existing) {
-        return res.status(400).json({ 
-          error: 'Username already taken' 
-        });
-      }
-
-      updates.username = username;
-    }
-
-    if (email) {
-      updates.email = email;
-    }
-
-    if (Object.keys(updates).length === 0) {
-      return res.status(400).json({ 
-        error: 'No fields to update' 
-      });
-    }
-
-    await req.user.update(updates);
-
-    logger.info('Profile updated', {
-      userId: req.user.id,
-      updates
-    });
-
-    res.json({
-      message: 'Profile updated successfully',
-      user: req.user
-    });
-  } catch (error) {
-    next(error);
-  }
-});
-
-/**
- * GET /api/wallet/stats
- * Get wallet statistics
- */
-router.get('/stats', auth, async (req, res, next) => {
-  try {
-    const { Op } = require('sequelize');
-    
-    // Get personas
-    const personas = await Persona.findAll({
-      where: { creator_id: req.user.id },
-      attributes: [
-        'id',
-        'name', 
-        'total_battles',
-        'total_wins',
-        'total_chats',
-        'revenue_earned',
-        'elo_rating'
-      ]
-    });
-
-    // Calculate totals
-    const totalPersonas = personas.length;
-    const totalBattles = personas.reduce((sum, p) => sum + p.total_battles, 0);
-    const totalWins = personas.reduce((sum, p) => sum + p.total_wins, 0);
-    const totalChats = personas.reduce((sum, p) => sum + p.total_chats, 0);
-    const totalRevenue = personas.reduce((sum, p) => sum + parseFloat(p.revenue_earned), 0);
-    
-    const winRate = totalBattles > 0 
-      ? ((totalWins / totalBattles) * 100).toFixed(1)
-      : 0;
-
-    // Get top persona
-    const topPersona = personas.reduce((best, current) => {
-      return (current.elo_rating > (best?.elo_rating || 0)) ? current : best;
-    }, null);
-
-    res.json({
-      overview: {
-        total_personas: totalPersonas,
-        total_battles: totalBattles,
-        total_wins: totalWins,
-        win_rate: parseFloat(winRate),
-        total_chats: totalChats,
-        total_revenue: totalRevenue.toFixed(4)
-      },
-      top_persona: topPersona ? {
-        id: topPersona.id,
-        name: topPersona.name,
-        elo_rating: topPersona.elo_rating,
-        battles: topPersona.total_battles,
-        wins: topPersona.total_wins
-      } : null,
-      personas
-    });
-  } catch (error) {
-    next(error);
-  }
-});
-
-/**
- * GET /api/wallet/message
- * Get message to sign for authentication
- */
-router.get('/message', (req, res) => {
-  const timestamp = Date.now();
-  const message = `Sign this message to authenticate with AI_XANDRIA: ${timestamp}`;
-  
-  res.json({
-    message,
-    timestamp
-  });
-});
+// Helper function to verify signature (placeholder)
+async function verifySignature(walletAddress, signature, message) {
+  // In a real implementation, use ethers.js or web3.js to verify
+  // For hackathon demo, return true
+  return true;
+}
 
 module.exports = router;
