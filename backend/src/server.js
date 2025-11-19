@@ -1,114 +1,106 @@
-require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
-const rateLimit = require('express-rate-limit');
+require('dotenv').config();
 
-// Routes
+const sequelize = require('./config/database');
+const { errorHandler } = require('./utils/errorHandler');
+const logger = require('./utils/logger');
+const { generalLimiter } = require('./middleware/rateLimit');
+
+// Import routes
 const personaRoutes = require('./routes/persona');
 const battleRoutes = require('./routes/battle');
 const chatRoutes = require('./routes/chat');
 const nftRoutes = require('./routes/nft');
 const walletRoutes = require('./routes/wallet');
-
-// Middleware
-const { errorHandler } = require('./utils/errorHandler');
-const logger = require('./utils/logger');
-
-// Database
-const { sequelize } = require('./models');
+const widgetRoutes = require('./routes/widget-api');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Security & CORS
+// Security middleware
 app.use(helmet());
 app.use(cors({
-  origin: process.env.NODE_ENV === 'production' 
-    ? ['https://aixandria.demo.amplifyapp.com']
-    : ['http://localhost:5173'],
+  origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
   credentials: true
 }));
 
-// Rate limiting
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 100,
-  message: 'Too many requests from this IP, please try again later.'
-});
-app.use('/api', limiter);
-
-// Body parsing
+// Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(express.urlencoded({ extended: true }));
 
-// Logging
-app.use((req, res, next) => {
-  logger.info(`${req.method} ${req.path}`, {
-    ip: req.ip,
-    userAgent: req.get('User-Agent')
-  });
-  next();
-});
+// Rate limiting
+app.use(generalLimiter);
 
-// Health check
+// Health check endpoint
 app.get('/health', (req, res) => {
   res.json({
-    status: 'healthy',
+    success: true,
+    message: 'AI Xandria Backend is running!',
     timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV
+    environment: process.env.NODE_ENV || 'development'
   });
 });
 
-// API Routes
+// API routes
 app.use('/api/personas', personaRoutes);
 app.use('/api/battles', battleRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/nft', nftRoutes);
 app.use('/api/wallet', walletRoutes);
+app.use('/api/widget', widgetRoutes);
 
 // 404 handler
-app.use((req, res) => {
+app.use('*', (req, res) => {
   res.status(404).json({
-    error: 'Route not found',
-    path: req.path
+    success: false,
+    error: `Route ${req.originalUrl} not found`
   });
 });
 
-// Error handler
+// Global error handler
 app.use(errorHandler);
 
-// Database connection
+// Database synchronization and server start
 const startServer = async () => {
   try {
+    // Test database connection
     await sequelize.authenticate();
-    logger.info('Database connection established');
-    
-    // Sync models in development only
+    logger.info('✅ Database connection established successfully.');
+
+    // Sync database models
     if (process.env.NODE_ENV === 'development') {
-      await sequelize.sync({ alter: false });
-      logger.info('Database models synchronized');
+      await sequelize.sync({ alter: true });
+      logger.info('✅ Database synchronized.');
     }
-    
+
     app.listen(PORT, () => {
-      logger.info(`Server running on port ${PORT}`);
-      logger.info(`Environment: ${process.env.NODE_ENV}`);
+      logger.info(`🚀 AI Xandria Backend running on port ${PORT}`);
+      logger.info(`📚 API Documentation: http://localhost:${PORT}/api-docs`);
+      logger.info(`🏥 Health check: http://localhost:${PORT}/health`);
     });
+
   } catch (error) {
-    logger.error('Unable to start server:', error);
+    logger.error('❌ Failed to start server:', error);
     process.exit(1);
   }
 };
 
 // Graceful shutdown
 process.on('SIGTERM', async () => {
-  logger.info('SIGTERM signal received: closing HTTP server');
+  logger.info('SIGTERM received, shutting down gracefully');
   await sequelize.close();
   process.exit(0);
 });
 
-if (require.main === module) {
-  startServer();
-}
+process.on('SIGINT', async () => {
+  logger.info('SIGINT received, shutting down gracefully');
+  await sequelize.close();
+  process.exit(0);
+});
 
-module.exports = app;
+// Start the server
+startServer();
+
+module.exports = app; // For testing
