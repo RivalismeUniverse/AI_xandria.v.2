@@ -1,272 +1,327 @@
 const express = require('express');
 const router = express.Router();
-const { Battle, Persona, BattleVote, User } = require('../models');
-const bedrockService = require('../services/aws-bedrock-service');
-const evolutionService = require('../services/evolutionService');
+const AWSBedrockService = require('../services/aws-bedrock-service');
+const EvolutionService = require('../services/evolutionService');
+const { Battle, Persona } = require('../models');
 const auth = require('../middleware/auth');
-const { asyncHandler } = require('../middleware/errorHandler'); // ✅ Add this
 const logger = require('../utils/logger');
 
-/**
- * POST /api/battles
- */
-router.post('/', auth, asyncHandler(async (req, res) => {
-  const { persona1_id, persona2_id, topic } = req.body;
-
-  if (!persona1_id || !persona2_id || !topic) {
-    return res.status(400).json({
-      error: 'persona1_id, persona2_id, and topic are required'
-    });
-  }
-
-  if (persona1_id === persona2_id) {
-    return res.status(400).json({
-      error: 'Cannot battle a persona against itself'
-    });
-  }
-
-  const [persona1, persona2] = await Promise.all([
-    Persona.findByPk(persona1_id),
-    Persona.findByPk(persona2_id)
-  ]);
-
-  if (!persona1 || !persona2) {
-    return res.status(404).json({ error: 'One or both personas not found' });
-  }
-
-  const battle = await Battle.create({
-    persona1_id,
-    persona2_id,
-    topic,
-    status: 'pending'
-  });
-
-  // Generate arguments asynchronously (don't await)
-  generateBattleArguments(battle.id, persona1, persona2, topic).catch(err => {
-    logger.error('Background argument generation failed', { battleId: battle.id, error: err });
-  });
-
-  logger.info('Battle created', {
-    battleId: battle.id,
-    persona1: persona1.name,
-    persona2: persona2.name,
-    topic
-  });
-
-  res.status(201).json(battle);
-}));
-
-/**
- * Background task: Generate AI arguments
- */
-async function generateBattleArguments(battleId, persona1, persona2, topic) {
+// Create new battle
+router.post('/create', auth, async (req, res) => {
   try {
-    const arg1 = await bedrockService.generateBattleArgument(persona1, topic);
-    const arg2 = await bedrockService.generateBattleArgument(persona2, topic, arg1);
+    const { topic, persona1_id, persona2_id } = req.body;
+    const walletAddress = req.walletAddress;
 
-    await Battle.update({
-      persona1_argument: arg1,
-      persona2_argument: arg2,
-      status: 'voting'
-    }, {
-      where: { id: battleId }
+    // Verify personas exist
+    const persona1 = await Persona.findByPk(persona1_id);
+    const persona2 = await Persona.findByPk(persona2_id);
+
+    if (!persona1 || !persona2) {
+      return res.status(404).json({
+        success: false,
+        error: 'One or both personas not found'
+      });
+    }
+
+    // Create battle
+    const battle = await Battle.create({
+      topic,
+      persona1_id,
+      persona2_id,
+      created_by: walletAddress,
+      status: 'active',
+      start_time: new Date()
     });
 
-    logger.info('Battle arguments generated', { battleId });
+    // Generate initial arguments
+    const [argument1, argument2] = await Promise.all([
+      AWSBedrockService.generateBattleArgument(persona1, topic),
+      AWSBedrockService.generateBattleArgument(persona2, topic)
+    ]);
+
+    // Update battle with initial arguments
+    await battle.update({
+      arguments: {
+        persona1: [argument1.argument],
+        persona2: [argument2.argument]
+      }
+    });
+
+    logger.info('Battle Created', {
+      battleId: battle.id,
+      topic,
+      personas: [persona1_id, persona2_id]
+    });
+
+    res.json({
+      success: true,
+      battle: {
+        ...battle.toJSON(),
+        persona1_name: persona1.name,
+        persona2_name: persona2.name
+      }
+    });
+
   } catch (error) {
-    logger.error('Failed to generate battle arguments', { battleId, error });
-    await Battle.update({ status: 'failed' }, { where: { id: battleId } });
+    logger.error('Battle Creation Error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Get battle by ID
+router.get('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const battle = await Battle.findByPk(id, {
+      include: [
+        { model: Persona, as: 'persona1', attributes: ['id', 'name', 'traits'] },
+        { model: Persona, as: 'persona2', attributes: ['id', 'name', 'traits'] }
+      ]
+    });
+
+    if (!battle) {
+      return res.status(404).json({
+        success: false,
+        error: 'Battle not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      battle: battle.toJSON()
+    });
+
+  } catch (error) {
+    logger.error('Get Battle Error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Vote on battle
+router.post('/:id/vote', auth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { winner_id } = req.body;
+    const walletAddress = req.walletAddress;
+
+    const battle = await Battle.findByPk(id);
+    
+    if (!battle) {
+      return res.status(404).json({
+        success: false,
+        error: 'Battle not found'
+      });
+    }
+
+    if (battle.status !== 'active') {
+      return res.status(400).json({
+        success: false,
+        error: 'Battle is not active'
+      });
+    }
+
+    // Update votes
+    const votes = battle.votes || { persona1: 0, persona2: 0 };
+    
+    if (winner_id === battle.persona1_id) {
+      votes.persona1 += 1;
+    } else if (winner_id === battle.persona2_id) {
+      votes.persona2 += 1;
+    } else {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid winner ID'
+      });
+    }
+
+    await battle.update({ votes });
+
+    // Check if battle should end (e.g., after 10 votes)
+    const totalVotes = votes.persona1 + votes.persona2;
+    if (totalVotes >= 10) {
+      await this.finalizeBattle(battle);
+    }
+
+    logger.info('Vote Cast', {
+      battleId: id,
+      voter: walletAddress,
+      winner: winner_id,
+      currentVotes: votes
+    });
+
+    res.json({
+      success: true,
+      votes,
+      totalVotes
+    });
+
+  } catch (error) {
+    logger.error('Vote Error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Generate next argument in battle
+router.post('/:id/next-argument', auth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { persona_id } = req.body;
+
+    const battle = await Battle.findByPk(id);
+    const persona = await Persona.findByPk(persona_id);
+
+    if (!battle || !persona) {
+      return res.status(404).json({
+        success: false,
+        error: 'Battle or persona not found'
+      });
+    }
+
+    // Get last argument from opponent
+    const arguments = battle.arguments;
+    const isPersona1 = persona_id === battle.persona1_id;
+    const opponentArguments = isPersona1 ? arguments.persona2 : arguments.persona1;
+    const lastOpponentArg = opponentArguments[opponentArguments.length - 1];
+
+    // Generate counter-argument
+    const newArgument = await AWSBedrockService.generateBattleArgument(
+      persona,
+      battle.topic,
+      lastOpponentArg
+    );
+
+    // Update battle arguments
+    if (isPersona1) {
+      arguments.persona1.push(newArgument.argument);
+    } else {
+      arguments.persona2.push(newArgument.argument);
+    }
+
+    await battle.update({ arguments });
+
+    res.json({
+      success: true,
+      argument: newArgument.argument,
+      argumentIndex: isPersona1 ? arguments.persona1.length - 1 : arguments.persona2.length - 1
+    });
+
+  } catch (error) {
+    logger.error('Next Argument Error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Get active battles
+router.get('/', async (req, res) => {
+  try {
+    const { limit = 20, offset = 0 } = req.query;
+    
+    const battles = await Battle.findAll({
+      where: { status: 'active' },
+      include: [
+        { model: Persona, as: 'persona1', attributes: ['id', 'name', 'traits', 'rating'] },
+        { model: Persona, as: 'persona2', attributes: ['id', 'name', 'traits', 'rating'] }
+      ],
+      order: [['start_time', 'DESC']],
+      limit: parseInt(limit),
+      offset: parseInt(offset)
+    });
+
+    res.json({
+      success: true,
+      battles: battles.map(b => b.toJSON()),
+      total: battles.length
+    });
+
+  } catch (error) {
+    logger.error('Get Battles Error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Helper method to finalize battle
+async function finalizeBattle(battle) {
+  try {
+    const votes = battle.votes;
+    let winner_id = null;
+
+    if (votes.persona1 > votes.persona2) {
+      winner_id = battle.persona1_id;
+    } else if (votes.persona2 > votes.persona1) {
+      winner_id = battle.persona2_id;
+    }
+    // tie = no winner
+
+    await battle.update({
+      status: 'completed',
+      winner_id,
+      end_time: new Date()
+    });
+
+    // Update persona stats and evolve traits
+    if (winner_id) {
+      const winner = await Persona.findByPk(winner_id);
+      const loser = await Persona.findByPk(
+        winner_id === battle.persona1_id ? battle.persona2_id : battle.persona1_id
+      );
+
+      if (winner && loser) {
+        await winner.increment('battle_wins');
+        await loser.increment('battle_losses');
+
+        // Evolve traits based on battle outcome
+        const winnerPerformance = {
+          battleResults: [{ won: true }],
+          battleWins: winner.battle_wins + 1,
+          battleLosses: winner.battle_losses
+        };
+
+        const loserPerformance = {
+          battleResults: [{ won: false }],
+          battleWins: loser.battle_wins,
+          battleLosses: loser.battle_losses + 1
+        };
+
+        const newWinnerTraits = EvolutionService.calculateNewTraits(winner.traits, winnerPerformance);
+        const newLoserTraits = EvolutionService.calculateNewTraits(loser.traits, loserPerformance);
+
+        await winner.update({ traits: newWinnerTraits });
+        await loser.update({ traits: newLoserTraits });
+
+        // Update ratings
+        const winnerNewRating = EvolutionService.calculateBattleRating(winner, loser, { won: true });
+        const loserNewRating = EvolutionService.calculateBattleRating(loser, winner, { won: false });
+
+        await winner.update({ rating: winnerNewRating });
+        await loser.update({ rating: loserNewRating });
+      }
+    }
+
+    logger.info('Battle Finalized', {
+      battleId: battle.id,
+      winner: winner_id,
+      votes
+    });
+
+  } catch (error) {
+    logger.error('Finalize Battle Error:', error);
   }
 }
-
-/**
- * GET /api/battles
- */
-router.get('/', asyncHandler(async (req, res) => {
-  const {
-    page = 1,
-    limit = 20,
-    status = 'all'
-  } = req.query;
-
-  const offset = (page - 1) * limit;
-  const where = status !== 'all' ? { status } : {};
-
-  const battles = await Battle.findAndCountAll({
-    where,
-    limit: parseInt(limit),
-    offset,
-    order: [['started_at', 'DESC']],
-    include: [
-      {
-        model: Persona,
-        as: 'persona1',
-        attributes: ['id', 'name', 'avatar_url']
-      },
-      {
-        model: Persona,
-        as: 'persona2',
-        attributes: ['id', 'name', 'avatar_url']
-      }
-    ]
-  });
-
-  res.json({
-    battles: battles.rows,
-    total: battles.count,
-    page: parseInt(page),
-    totalPages: Math.ceil(battles.count / limit)
-  });
-}));
-
-/**
- * GET /api/battles/:id
- */
-router.get('/:id', asyncHandler(async (req, res) => {
-  const battle = await Battle.findByPk(req.params.id, {
-    include: [
-      {
-        model: Persona,
-        as: 'persona1',
-        include: [{
-          model: User,
-          as: 'creator',
-          attributes: ['username']
-        }]
-      },
-      {
-        model: Persona,
-        as: 'persona2',
-        include: [{
-          model: User,
-          as: 'creator',
-          attributes: ['username']
-        }]
-      }
-    ]
-  });
-
-  if (!battle) {
-    return res.status(404).json({ error: 'Battle not found' });
-  }
-
-  res.json(battle);
-}));
-
-/**
- * POST /api/battles/:id/vote
- */
-router.post('/:id/vote', auth, asyncHandler(async (req, res) => {
-  const { voted_for } = req.body;
-  const battleId = req.params.id;
-
-  if (!voted_for) {
-    return res.status(400).json({ error: 'voted_for is required' });
-  }
-
-  const battle = await Battle.findByPk(battleId);
-
-  if (!battle) {
-    return res.status(404).json({ error: 'Battle not found' });
-  }
-
-  if (battle.status !== 'voting') {
-    return res.status(400).json({
-      error: 'Battle is not open for voting'
-    });
-  }
-
-  if (voted_for !== battle.persona1_id && voted_for !== battle.persona2_id) {
-    return res.status(400).json({
-      error: 'Invalid persona for this battle'
-    });
-  }
-
-  const existingVote = await BattleVote.findOne({
-    where: {
-      battle_id: battleId,
-      voter_id: req.user.id
-    }
-  });
-
-  if (existingVote) {
-    return res.status(400).json({ error: 'You already voted in this battle' });
-  }
-
-  await BattleVote.create({
-    battle_id: battleId,
-    voter_id: req.user.id,
-    voted_for
-  });
-
-  if (voted_for === battle.persona1_id) {
-    battle.persona1_votes += 1;
-  } else {
-    battle.persona2_votes += 1;
-  }
-  await battle.save();
-
-  logger.info('Vote cast', {
-    battleId,
-    voterId: req.user.id,
-    votedFor: voted_for
-  });
-
-  res.json({
-    message: 'Vote recorded',
-    persona1_votes: battle.persona1_votes,
-    persona2_votes: battle.persona2_votes
-  });
-}));
-
-/**
- * POST /api/battles/:id/complete
- */
-router.post('/:id/complete', auth, asyncHandler(async (req, res) => {
-  const battle = await Battle.findByPk(req.params.id, {
-    include: ['persona1', 'persona2']
-  });
-
-  if (!battle) {
-    return res.status(404).json({ error: 'Battle not found' });
-  }
-
-  if (battle.status === 'completed') {
-    return res.status(400).json({ error: 'Battle already completed' });
-  }
-
-  const winner_id = battle.persona1_votes > battle.persona2_votes
-    ? battle.persona1_id
-    : battle.persona2_id;
-
-  battle.winner_id = winner_id;
-  battle.status = 'completed';
-  battle.completed_at = new Date();
-  await battle.save();
-
-  await Persona.increment('total_battles', {
-    where: { id: [battle.persona1_id, battle.persona2_id] }
-  });
-  await Persona.increment('total_wins', {
-    where: { id: winner_id }
-  });
-
-  // Trigger evolution (don't await)
-  evolutionService.evolveBattlePersonas(battle).catch(err => {
-    logger.error('Evolution failed', { battleId: battle.id, error: err });
-  });
-
-  logger.info('Battle completed', {
-    battleId: battle.id,
-    winnerId: winner_id
-  });
-
-  res.json({
-    message: 'Battle completed',
-    winner_id,
-    persona1_votes: battle.persona1_votes,
-    persona2_votes: battle.persona2_votes
-  });
-}));
 
 module.exports = router;
